@@ -1,7 +1,7 @@
 ---
 title: float&double&decimal精度损失
 tagline: "spark"
-category : java
+category : Java
 layout: post
 tags : [Spark,scala,java]
 ---

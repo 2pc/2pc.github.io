@@ -3,7 +3,7 @@ layout: post
 title: "Java并发编程的艺术-方腾飞笔记"
 keywords: ["java","JUC"]
 description: "Java Juc"
-category: "java"
+category: "Java"
 tags: ["Java","JUC"]
 ---
 
