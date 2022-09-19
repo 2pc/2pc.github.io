@@ -1,12 +1,12 @@
 ---
 title: FlinkSQL 
 tagline: "flink"
-category : flink
+category : Flink
 layout: post
 tags : [flink]
 ---
  
- ```
+ ```F
 data1:
 (A,L-7,2019-10-06 20:41:00.001)
 (B,L-7,2019-10-06 20:41:05.000)
