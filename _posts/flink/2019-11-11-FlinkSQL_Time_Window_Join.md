@@ -1,7 +1,7 @@
 ---
 title: Flink Time Window Join原理
 tagline: ""
-category : flink
+category : Flink
 layout: post
 tags : [flink, streamsets, realtime]
 ---

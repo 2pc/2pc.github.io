@@ -1,7 +1,7 @@
 ---
 title: Flink On Yarn
 tagline: ""
-category : flink
+category : Flink
 layout: post
 tags : [flink, streamsets, realtime]
 ---

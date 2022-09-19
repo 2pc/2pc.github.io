@@ -1,7 +1,7 @@
 ---
 title: Flink Exactly-Once 
 tagline: ""
-category : flink
+category : Flink
 layout: post
 tags : [flink, streamsets, realtime]
 ---

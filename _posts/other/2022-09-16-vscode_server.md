@@ -6,7 +6,7 @@ category : code-server
 layout: post
 tags : [https, code-server]
 ---
-###安装code-server
+### 安装code-server
 ```
 wget https://github.com/coder/code-server/releases/download/v4.6.1/code-server-4.6.1-linux-amd64.tar.gz
 tar zxvf code-server-4.6.1-linux-amd64.tar.gz
@@ -86,13 +86,13 @@ openssl x509 -req -days 3650 -in abc.csr -signkey abc.key -out abc.crt -extensio
 ```
 abc.csr
 abc.crt
-abc.key
+abc.key abc.key
 ```
 ### 将abc.crt下载到本地并导入
 这一步很关键，不然浏览器还是会报不信任证书
 > windows 命令行输入: certmgr.msc
 受信任的证书颁发机构->所有任务->导入
-
+更多工具里点添加到桌面
 最后启动code-server
 ```
 ./bin/code-server --port 8080 --host 0.0.0.0  --cert /home/openssl/abc.crt  --cert-key /home/openssl/abc.key

@@ -1,7 +1,7 @@
 ---
 title: Flink Join说明
 tagline: ""
-category : flink
+category : Flink
 layout: post
 tags : [flink, streamsets, realtime]
 ---

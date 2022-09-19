@@ -1,7 +1,7 @@
 ---
 title: Flink jobmanager&taskmanager的启动
 tagline: ""
-category : flink
+category : Flink
 layout: post
 tags : [flink, yarn, realtime]
 ---
