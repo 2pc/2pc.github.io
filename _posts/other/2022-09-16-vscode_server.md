@@ -93,10 +93,9 @@ abc.key abc.key
 > windows 命令行输入: certmgr.msc
 受信任的证书颁发机构->所有任务->导入
 更多工具里点添加到桌面
-最后启动code-server
+最后启动code-server   
 ```
 ./bin/code-server --port 8080 --host 0.0.0.0  --cert /home/openssl/abc.crt  --cert-key /home/openssl/abc.key
-
 ```
 
 
