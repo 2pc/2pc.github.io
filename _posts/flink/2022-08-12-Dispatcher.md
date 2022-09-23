@@ -5,6 +5,7 @@ category : Flink1.15
 layout: post
 tags : [flink, realtime]
 ---
+
 AM启动类YarnApplicationClusterEntryPoint<br />YarnApplicationClusterEntryPoint.main<br />ClusterEntrypoint.runClusterEntrypoint<br />ClusterEntrypoint.startCluster<br />ClusterEntrypoint.runCluster
 ```
 private void runCluster(Configuration configuration, PluginManager pluginManager)
