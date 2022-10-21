@@ -39,7 +39,7 @@ public static CompletableFuture<Void> runAsync(Runnable runnable) {
 }
 
 ```
-### 以CompletableFuture.thenApply为例
+### 以CompletableFuture.supplyAsync为例
 ```
 
 ```
