@@ -77,6 +77,9 @@ ConsumeMessageConcurrentlyService的在DefaultMQPushConsumerImpl里实现
   }
 ```
 
+重试机制
 
 
-感觉涉及挺奇怪的 虽然这两service 构造函数都需要DefaultMQPushConsumerImpl作为参数,但是
+感觉设计挺奇怪的 虽然这两service 构造函数都需要DefaultMQPushConsumerImpl作为参数,但是
+
+%RETRY%+consumerGroup-->SCHEDULE_TOPIC_XXXX-->%DLQ%+consumerGroup
