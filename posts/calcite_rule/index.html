@@ -1,0 +1,1321 @@
+<!DOCTYPE html><html lang="en" ><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"><meta name="generator" content="Jekyll v4.2.2" /><meta property="og:title" content="FlinkSQL(Flink1.15)规则优化以及Calcite原理" /><meta property="og:locale" content="en" /><meta name="description" content="SQL语句示例 1 select p.id,o.id from products p join orders o on p.id=o.id where p.id &gt; 5 优化前，从SqlNode到RelNode阶段，从SqlToRelConverter.convertQuery的trace日志 1 2 3 4 5 6 [DEBUG] 2022-08-22 14:50:41,662(627) --&gt; [main] org.apache.calcite.sql2rel.SqlToRelConverter.convertQuery(SqlToRelConverter.java:576): Plan after converting SqlNode to RelNode LogicalProject(ID=[$0], ID0=[$3]) LogicalFilter(condition=[&gt;($0, 1)]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalTableScan(table=[[PRODUCTS]]) LogicalTableScan(table=[[ORDERS]]) 优化后 1 2 3 4 5 LogicalProject(ID=[$0], ID0=[$3]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalFilter(condition=[&gt;($0, 5)]) EnumerableTableScan(table=[[PRODUCTS]]) EnumerableTableScan(table=[[ORDERS]]) SQL示例2 1 2 select u.id as user_id, u.name as user_name, w.content as content, u.age as user_age from users u&quot; + &quot; join weibos w on u.id=w.id where u.age &gt; 30 and w.id&gt;10 order by user_id 优化前,还是从SqlNode到RelNode阶段 1 2 3 4 5 6 7 [DEBUG] 2022-08-22 15:13:44,542(552) --&gt; [main] org.apache.calcite.sql2rel.SqlToRelConverter.convertQuery(SqlToRelConverter.java:576): Plan after converting SqlNode to RelNode LogicalSort(sort0=[$0], dir0=[ASC]) LogicalProject(USER_ID=[$0], USER_NAME=[$1], CONTENT=[$5], USER_AGE=[$2]) LogicalFilter(condition=[AND(&gt;($2, 30), &gt;($3, 10))]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalTableScan(table=[[USERS]]) LogicalTableScan(table=[[WEIBOS]]) 优化后，因为两个表都有条件，生成了两个LogicalFilter ``` LogicalSort(sort0=[$0], dir0=[ASC]) LogicalProject(USER_ID=[$0], USER_NAME=[$1], CONTENT=[$5], USER_AGE=[$2]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalFilter(condition=[&gt;($2, 30)])// EnumerableTableScan(table=[[USERS]]) LogicalFilter(condition=[&gt;($0, 10)]) EnumerableTableScan(table=[[WEIBOS]]) //" /><meta property="og:description" content="SQL语句示例 1 select p.id,o.id from products p join orders o on p.id=o.id where p.id &gt; 5 优化前，从SqlNode到RelNode阶段，从SqlToRelConverter.convertQuery的trace日志 1 2 3 4 5 6 [DEBUG] 2022-08-22 14:50:41,662(627) --&gt; [main] org.apache.calcite.sql2rel.SqlToRelConverter.convertQuery(SqlToRelConverter.java:576): Plan after converting SqlNode to RelNode LogicalProject(ID=[$0], ID0=[$3]) LogicalFilter(condition=[&gt;($0, 1)]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalTableScan(table=[[PRODUCTS]]) LogicalTableScan(table=[[ORDERS]]) 优化后 1 2 3 4 5 LogicalProject(ID=[$0], ID0=[$3]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalFilter(condition=[&gt;($0, 5)]) EnumerableTableScan(table=[[PRODUCTS]]) EnumerableTableScan(table=[[ORDERS]]) SQL示例2 1 2 select u.id as user_id, u.name as user_name, w.content as content, u.age as user_age from users u&quot; + &quot; join weibos w on u.id=w.id where u.age &gt; 30 and w.id&gt;10 order by user_id 优化前,还是从SqlNode到RelNode阶段 1 2 3 4 5 6 7 [DEBUG] 2022-08-22 15:13:44,542(552) --&gt; [main] org.apache.calcite.sql2rel.SqlToRelConverter.convertQuery(SqlToRelConverter.java:576): Plan after converting SqlNode to RelNode LogicalSort(sort0=[$0], dir0=[ASC]) LogicalProject(USER_ID=[$0], USER_NAME=[$1], CONTENT=[$5], USER_AGE=[$2]) LogicalFilter(condition=[AND(&gt;($2, 30), &gt;($3, 10))]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalTableScan(table=[[USERS]]) LogicalTableScan(table=[[WEIBOS]]) 优化后，因为两个表都有条件，生成了两个LogicalFilter ``` LogicalSort(sort0=[$0], dir0=[ASC]) LogicalProject(USER_ID=[$0], USER_NAME=[$1], CONTENT=[$5], USER_AGE=[$2]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalFilter(condition=[&gt;($2, 30)])// EnumerableTableScan(table=[[USERS]]) LogicalFilter(condition=[&gt;($0, 10)]) EnumerableTableScan(table=[[WEIBOS]]) //" /><link rel="canonical" href="/posts/calcite_rule/" /><meta property="og:url" content="/posts/calcite_rule/" /><meta property="og:site_name" content="2pc" /><meta property="og:type" content="article" /><meta property="article:published_time" content="2022-08-23T00:00:00+00:00" /><meta name="twitter:card" content="summary" /><meta property="twitter:title" content="FlinkSQL(Flink1.15)规则优化以及Calcite原理" /><meta name="twitter:site" content="@2pc" /> <script type="application/ld+json"> {"@context":"https://schema.org","@type":"BlogPosting","dateModified":"2022-10-17T12:13:57+00:00","datePublished":"2022-08-23T00:00:00+00:00","description":"SQL语句示例 1 select p.id,o.id from products p join orders o on p.id=o.id where p.id &gt; 5 优化前，从SqlNode到RelNode阶段，从SqlToRelConverter.convertQuery的trace日志 1 2 3 4 5 6 [DEBUG] 2022-08-22 14:50:41,662(627) --&gt; [main] org.apache.calcite.sql2rel.SqlToRelConverter.convertQuery(SqlToRelConverter.java:576): Plan after converting SqlNode to RelNode LogicalProject(ID=[$0], ID0=[$3]) LogicalFilter(condition=[&gt;($0, 1)]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalTableScan(table=[[PRODUCTS]]) LogicalTableScan(table=[[ORDERS]]) 优化后 1 2 3 4 5 LogicalProject(ID=[$0], ID0=[$3]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalFilter(condition=[&gt;($0, 5)]) EnumerableTableScan(table=[[PRODUCTS]]) EnumerableTableScan(table=[[ORDERS]]) SQL示例2 1 2 select u.id as user_id, u.name as user_name, w.content as content, u.age as user_age from users u&quot; + &quot; join weibos w on u.id=w.id where u.age &gt; 30 and w.id&gt;10 order by user_id 优化前,还是从SqlNode到RelNode阶段 1 2 3 4 5 6 7 [DEBUG] 2022-08-22 15:13:44,542(552) --&gt; [main] org.apache.calcite.sql2rel.SqlToRelConverter.convertQuery(SqlToRelConverter.java:576): Plan after converting SqlNode to RelNode LogicalSort(sort0=[$0], dir0=[ASC]) LogicalProject(USER_ID=[$0], USER_NAME=[$1], CONTENT=[$5], USER_AGE=[$2]) LogicalFilter(condition=[AND(&gt;($2, 30), &gt;($3, 10))]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalTableScan(table=[[USERS]]) LogicalTableScan(table=[[WEIBOS]]) 优化后，因为两个表都有条件，生成了两个LogicalFilter ``` LogicalSort(sort0=[$0], dir0=[ASC]) LogicalProject(USER_ID=[$0], USER_NAME=[$1], CONTENT=[$5], USER_AGE=[$2]) LogicalJoin(condition=[=($0, $3)], joinType=[inner]) LogicalFilter(condition=[&gt;($2, 30)])// EnumerableTableScan(table=[[USERS]]) LogicalFilter(condition=[&gt;($0, 10)]) EnumerableTableScan(table=[[WEIBOS]]) //","headline":"FlinkSQL(Flink1.15)规则优化以及Calcite原理","mainEntityOfPage":{"@type":"WebPage","@id":"/posts/calcite_rule/"},"url":"/posts/calcite_rule/"}</script><title>FlinkSQL(Flink1.15)规则优化以及Calcite原理 | 2pc</title><link rel="apple-touch-icon" sizes="180x180" href="/assets/img/favicons/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicons/favicon-32x32.png"><link rel="icon" type="image/png" sizes="16x16" href="/assets/img/favicons/favicon-16x16.png"><link rel="manifest" href="/assets/img/favicons/site.webmanifest"><link rel="shortcut icon" href="/assets/img/favicons/favicon.ico"><meta name="apple-mobile-web-app-title" content="2pc"><meta name="application-name" content="2pc"><meta name="msapplication-TileColor" content="#da532c"><meta name="msapplication-config" content="/assets/img/favicons/browserconfig.xml"><meta name="theme-color" content="#ffffff"><link rel="preconnect" href="https://fonts.googleapis.com" ><link rel="dns-prefetch" href="https://fonts.googleapis.com" ><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.gstatic.com" crossorigin><link rel="preconnect" href="https://fonts.googleapis.com" ><link rel="dns-prefetch" href="https://fonts.googleapis.com" ><link rel="preconnect" href="https://cdn.jsdelivr.net" ><link rel="dns-prefetch" href="https://cdn.jsdelivr.net" ><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato&family=Source+Sans+Pro:wght@400;600;700;900&display=swap"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4/dist/css/bootstrap.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.11.2/css/all.min.css"><link rel="stylesheet" href="/assets/css/style.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/afeld/bootstrap-toc@1.0.1/dist/bootstrap-toc.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/magnific-popup@1/dist/magnific-popup.min.css"> <script src="https://cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script> <script type="text/javascript"> class ModeToggle { static get MODE_KEY() { return "mode"; } static get MODE_ATTR() { return "data-mode"; } static get DARK_MODE() { return "dark"; } static get LIGHT_MODE() { return "light"; } static get ID() { return "mode-toggle"; } constructor() { if (this.hasMode) { if (this.isDarkMode) { if (!this.isSysDarkPrefer) { this.setDark(); } } else { if (this.isSysDarkPrefer) { this.setLight(); } } } let self = this; /* always follow the system prefers */ this.sysDarkPrefers.addEventListener("change", () => { if (self.hasMode) { if (self.isDarkMode) { if (!self.isSysDarkPrefer) { self.setDark(); } } else { if (self.isSysDarkPrefer) { self.setLight(); } } self.clearMode(); } self.notify(); }); } /* constructor() */ get sysDarkPrefers() { return window.matchMedia("(prefers-color-scheme: dark)"); } get isSysDarkPrefer() { return this.sysDarkPrefers.matches; } get isDarkMode() { return this.mode === ModeToggle.DARK_MODE; } get isLightMode() { return this.mode === ModeToggle.LIGHT_MODE; } get hasMode() { return this.mode != null; } get mode() { return sessionStorage.getItem(ModeToggle.MODE_KEY); } /* get the current mode on screen */ get modeStatus() { if (this.isDarkMode || (!this.hasMode && this.isSysDarkPrefer)) { return ModeToggle.DARK_MODE; } else { return ModeToggle.LIGHT_MODE; } } setDark() { $('html').attr(ModeToggle.MODE_ATTR, ModeToggle.DARK_MODE); sessionStorage.setItem(ModeToggle.MODE_KEY, ModeToggle.DARK_MODE); } setLight() { $('html').attr(ModeToggle.MODE_ATTR, ModeToggle.LIGHT_MODE); sessionStorage.setItem(ModeToggle.MODE_KEY, ModeToggle.LIGHT_MODE); } clearMode() { $('html').removeAttr(ModeToggle.MODE_ATTR); sessionStorage.removeItem(ModeToggle.MODE_KEY); } /* Notify another plugins that the theme mode has changed */ notify() { window.postMessage({ direction: ModeToggle.ID, message: this.modeStatus }, "*"); } } /* ModeToggle */ const toggle = new ModeToggle(); function flipMode() { if (toggle.hasMode) { if (toggle.isSysDarkPrefer) { if (toggle.isLightMode) { toggle.clearMode(); } else { toggle.setLight(); } } else { if (toggle.isDarkMode) { toggle.clearMode(); } else { toggle.setDark(); } } } else { if (toggle.isSysDarkPrefer) { toggle.setLight(); } else { toggle.setDark(); } } toggle.notify(); } /* flipMode() */ </script><body data-spy="scroll" data-target="#toc" data-topbar-visible="true"><div id="sidebar" class="d-flex flex-column align-items-end"><div class="profile-wrapper text-center"><div id="avatar"> <a href="/" class="mx-auto"> <img src="/assets/sample/avatar.jpg" alt="avatar" onerror="this.style.display='none'"> </a></div><div class="site-title mt-3"> <a href="/">2pc</a></div><div class="site-subtitle font-italic">A text-focused Jekyll theme</div></div><ul class="w-100"><li class="nav-item"> <a href="/" class="nav-link"> <i class="fa-fw fas fa-home ml-xl-3 mr-xl-3 unloaded"></i> <span>HOME</span> </a><li class="nav-item"> <a href="/categories/" class="nav-link"> <i class="fa-fw fas fa-stream ml-xl-3 mr-xl-3 unloaded"></i> <span>CATEGORIES</span> </a><li class="nav-item"> <a href="/tags/" class="nav-link"> <i class="fa-fw fas fa-tag ml-xl-3 mr-xl-3 unloaded"></i> <span>TAGS</span> </a><li class="nav-item"> <a href="/archives/" class="nav-link"> <i class="fa-fw fas fa-archive ml-xl-3 mr-xl-3 unloaded"></i> <span>ARCHIVES</span> </a><li class="nav-item"> <a href="/about/" class="nav-link"> <i class="fa-fw fas fa-info-circle ml-xl-3 mr-xl-3 unloaded"></i> <span>ABOUT</span> </a></ul><div class="sidebar-bottom mt-auto d-flex flex-wrap justify-content-center align-items-center"> <button class="mode-toggle btn" aria-label="Switch Mode"> <i class="fas fa-adjust"></i> </button> <span class="icon-border"></span> <a href="https://github.com/2pc" aria-label="github" target="_blank" rel="noopener"> <i class="fab fa-github"></i> </a> <a href="https://twitter.com/2pc" aria-label="twitter" target="_blank" rel="noopener"> <i class="fab fa-twitter"></i> </a> <a href=" javascript:location.href = 'mailto:' + ['2pcgithub','gmail.com'].join('@')" aria-label="email" > <i class="fas fa-envelope"></i> </a> <a href="/feed.xml" aria-label="rss" > <i class="fas fa-rss"></i> </a></div></div><div id="topbar-wrapper"><div id="topbar" class="container d-flex align-items-center justify-content-between h-100 pl-3 pr-3 pl-md-4 pr-md-4"> <span id="breadcrumb"> <span> <a href="/"> Home </a> </span> <span>FlinkSQL(Flink1.15)规则优化以及Calcite原理</span> </span> <i id="sidebar-trigger" class="fas fa-bars fa-fw"></i><div id="topbar-title"> Post</div><i id="search-trigger" class="fas fa-search fa-fw"></i> <span id="search-wrapper" class="align-items-center"> <i class="fas fa-search fa-fw"></i> <input class="form-control" id="search-input" type="search" aria-label="search" autocomplete="off" placeholder="Search..."> </span> <span id="search-cancel" >Cancel</span></div></div><div id="main-wrapper" class="d-flex justify-content-center"><div id="main" class="container pl-xl-4 pr-xl-4"><div class="row"><div id="core-wrapper" class="col-12 col-lg-11 col-xl-9 pr-xl-4"><div class="post pl-1 pr-1 pl-md-2 pr-md-2"><h1 data-toc-skip>FlinkSQL(Flink1.15)规则优化以及Calcite原理</h1><div class="post-meta text-muted"> <span> Posted <em class="" data-ts="1661212800" data-df="ll" data-toggle="tooltip" data-placement="bottom"> Aug 23, 2022 </em> </span> <span> Updated <em class="" data-ts="1666008837" data-df="ll" data-toggle="tooltip" data-placement="bottom"> Oct 17, 2022 </em> </span><div class="d-flex justify-content-between"> <span> By <em> <a href="https://twitter.com/2pc">2pc</a> </em> </span><div> <span class="readtime" data-toggle="tooltip" data-placement="bottom" title="3151 words"> <em>17 min</em> read</span></div></div></div><div class="post-content"><p>SQL语句示例</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+</pre><td class="rouge-code"><pre>select p.id,o.id from products p join orders o on p.id=o.id where p.id &gt; 5
+</pre></table></code></div></div><p>优化前，从SqlNode到RelNode阶段，从SqlToRelConverter.convertQuery的trace日志</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+</pre><td class="rouge-code"><pre>[DEBUG] 2022-08-22 14:50:41,662(627) --&gt; [main] org.apache.calcite.sql2rel.SqlToRelConverter.convertQuery(SqlToRelConverter.java:576): Plan after converting SqlNode to RelNode
+LogicalProject(ID=[$0], ID0=[$3])
+  LogicalFilter(condition=[&gt;($0, 1)])
+    LogicalJoin(condition=[=($0, $3)], joinType=[inner])
+      LogicalTableScan(table=[[PRODUCTS]])
+      LogicalTableScan(table=[[ORDERS]])
+</pre></table></code></div></div><p>优化后</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+</pre><td class="rouge-code"><pre>LogicalProject(ID=[$0], ID0=[$3])
+  LogicalJoin(condition=[=($0, $3)], joinType=[inner])
+    LogicalFilter(condition=[&gt;($0, 5)])
+      EnumerableTableScan(table=[[PRODUCTS]])
+    EnumerableTableScan(table=[[ORDERS]])
+</pre></table></code></div></div><p>SQL示例2</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+</pre><td class="rouge-code"><pre>select u.id as user_id, u.name as user_name, w.content as content, u.age as user_age from users u"
+            + " join weibos  w on u.id=w.id where u.age &gt; 30 and w.id&gt;10 order by user_id
+</pre></table></code></div></div><p>优化前,还是从SqlNode到RelNode阶段</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+</pre><td class="rouge-code"><pre>[DEBUG] 2022-08-22 15:13:44,542(552) --&gt; [main] org.apache.calcite.sql2rel.SqlToRelConverter.convertQuery(SqlToRelConverter.java:576): Plan after converting SqlNode to RelNode
+LogicalSort(sort0=[$0], dir0=[ASC])
+  LogicalProject(USER_ID=[$0], USER_NAME=[$1], CONTENT=[$5], USER_AGE=[$2])
+    LogicalFilter(condition=[AND(&gt;($2, 30), &gt;($3, 10))])
+      LogicalJoin(condition=[=($0, $3)], joinType=[inner])
+        LogicalTableScan(table=[[USERS]])
+        LogicalTableScan(table=[[WEIBOS]])
+</pre></table></code></div></div><p>优化后，因为两个表都有条件，生成了两个LogicalFilter</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+</pre><td class="rouge-code"><pre>LogicalSort(sort0=[$0], dir0=[ASC])
+  LogicalProject(USER_ID=[$0], USER_NAME=[$1], CONTENT=[$5], USER_AGE=[$2])
+    LogicalJoin(condition=[=($0, $3)], joinType=[inner])
+      LogicalFilter(condition=[&gt;($2, 30)])//
+        EnumerableTableScan(table=[[USERS]])
+      LogicalFilter(condition=[&gt;($0, 10)])
+        EnumerableTableScan(table=[[WEIBOS]])
+//
+
+</pre></table></code></div></div><p>trace日志</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+</pre><td class="rouge-code"><pre>[TRACE] 2022-08-22 14:50:41,737(702) --&gt; [main] org.apache.calcite.plan.hep.HepPlanner.dumpGraph(HepPlanner.java:1015): 
+//filter没下推
+Breadth-first from root:  {
+    HepRelVertex#18 = rel#17:LogicalProject(input=HepRelVertex#16,ID=$0,ID0=$3), rowcount=750.0, cumulative cost=3200.0
+    HepRelVertex#16 = rel#15:LogicalFilter(input=HepRelVertex#14,condition=&gt;($0, 1)), rowcount=750.0, cumulative cost=2450.0
+    HepRelVertex#14 = rel#13:LogicalJoin(left=HepRelVertex#11,right=HepRelVertex#12,condition==($0, $3),joinType=inner), rowcount=1500.0, cumulative cost=1700.0
+    HepRelVertex#11 = rel#6:EnumerableTableScan(table=[PRODUCTS]), rowcount=100.0, cumulative cost=100.0
+    HepRelVertex#12 = rel#7:EnumerableTableScan(table=[ORDERS]), rowcount=100.0, cumulative cost=100.0
+}  
+[TRACE] 2022-08-22 14:50:41,737(702) --&gt; [main] org.apache.calcite.plan.hep.HepPlanner.applyRules(HepPlanner.java:402): Applying rule set [FilterJoinRule:FilterJoinRule:filter]  
+[TRACE] 2022-08-22 14:50:41,737(702) --&gt; [main] org.apache.calcite.plan.hep.HepPlanner.collectGarbage(HepPlanner.java:944): collecting garbage  
+//FilterJoinRule:FilterJoinRule规则
+[DEBUG] 2022-08-22 14:50:41,740(705) --&gt; [main] org.apache.calcite.plan.AbstractRelOptPlanner.fireRule(AbstractRelOptPlanner.java:305): call#0: Apply rule [FilterJoinRule:FilterJoinRule:filter] to [rel#15:LogicalFilter(input=HepRelVertex#14,condition=&gt;($0, 1)), rel#13:LogicalJoin(left=HepRelVertex#11,right=HepRelVertex#12,condition==($0, $3),joinType=inner)]  
+[TRACE] 2022-08-22 14:54:56,202(255167) --&gt; [main] org.apache.calcite.rel.AbstractRelNode.&lt;init&gt;(AbstractRelNode.java:116): new LogicalFilter#19  
+[TRACE] 2022-08-22 14:54:56,208(255173) --&gt; [main] org.apache.calcite.rel.AbstractRelNode.&lt;init&gt;(AbstractRelNode.java:116): new LogicalJoin#20  
+//FilterJoinRule:FilterJoinRule规则
+[DEBUG] 2022-08-22 14:54:56,209(255174) --&gt; [main] org.apache.calcite.plan.AbstractRelOptPlanner.notifyTransformation(AbstractRelOptPlanner.java:345): call#0: Rule FilterJoinRule:FilterJoinRule:filter arguments [rel#15:LogicalFilter(input=HepRelVertex#14,condition=&gt;($0, 1)), rel#13:LogicalJoin(left=HepRelVertex#11,right=HepRelVertex#12,condition==($0, $3),joinType=inner)] produced LogicalJoin#20  
+[TRACE] 2022-08-22 14:54:56,228(255193) --&gt; [main] org.apache.calcite.rel.AbstractRelNode.&lt;init&gt;(AbstractRelNode.java:116): new HepRelVertex#21  
+[TRACE] 2022-08-22 14:54:56,228(255193) --&gt; [main] org.apache.calcite.rel.AbstractRelNode.&lt;init&gt;(AbstractRelNode.java:116): new LogicalJoin#22  
+[TRACE] 2022-08-22 14:54:56,228(255193) --&gt; [main] org.apache.calcite.rel.AbstractRelNode.&lt;init&gt;(AbstractRelNode.java:116): new HepRelVertex#23  
+[TRACE] 2022-08-22 14:54:56,230(255195) --&gt; [main] org.apache.calcite.plan.hep.HepPlanner.dumpGraph(HepPlanner.java:1015): 
+//filter下推后
+Breadth-first from root:  {
+    HepRelVertex#18 = rel#17:LogicalProject(input=HepRelVertex#16,ID=$0,ID0=$3), rowcount=750.0, cumulative cost=1750.0
+    HepRelVertex#23 = rel#22:LogicalJoin(left=HepRelVertex#21,right=HepRelVertex#12,condition==($0, $3),joinType=inner), rowcount=750.0, cumulative cost=1000.0
+    HepRelVertex#21 = rel#19:LogicalFilter(input=HepRelVertex#11,condition=&gt;($0, 1)), rowcount=50.0, cumulative cost=150.0
+    HepRelVertex#12 = rel#7:EnumerableTableScan(table=[ORDERS]), rowcount=100.0, cumulative cost=100.0
+    HepRelVertex#11 = rel#6:EnumerableTableScan(table=[PRODUCTS]), rowcount=100.0, cumulative cost=100.0
+}  
+</pre></table></code></div></div><p>看下原理,首先是优化器，使用HepPlanner优化器，并添加规则FilterIntoJoinRule</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+</pre><td class="rouge-code"><pre>HepProgramBuilder builder = new HepProgramBuilder();
+//这里添加一条规则
+builder.addRuleInstance(FilterJoinRule.FilterIntoJoinRule.FILTER_ON_JOIN);
+HepPlanner planner = new HepPlanner(builder.build());
+</pre></table></code></div></div><p>优化调用 planner的findBestExp()方法</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+</pre><td class="rouge-code"><pre>  // implement RelOptPlanner
+  public RelNode findBestExp() {
+    assert root != null;
+
+    executeProgram(mainProgram);
+
+    // Get rid of everything except what's in the final plan.
+    collectGarbage();
+
+    return buildFinalPlan(root);
+  }
+
+  private void executeProgram(HepProgram program) {
+    HepProgram savedProgram = currentProgram;
+    currentProgram = program;
+    currentProgram.initialize(program == mainProgram);
+    for (HepInstruction instruction : currentProgram.instructions) {
+      instruction.execute(this);//RuleInstance这里比较关键
+      int delta = nTransformations - nTransformationsLastGC;
+      if (delta &gt; graphSizeLastGC) {
+        // The number of transformations performed since the last
+        // garbage collection is greater than the number of vertices in
+        // the graph at that time.  That means there should be a
+        // reasonable amount of garbage to collect now.  We do it this
+        // way to amortize garbage collection cost over multiple
+        // instructions, while keeping the highwater memory usage
+        // proportional to the graph size.
+        collectGarbage();
+      }
+    }
+    currentProgram = savedProgram;
+  }
+</pre></table></code></div></div><p>RuleInstance.execute</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+</pre><td class="rouge-code"><pre>static class RuleInstance extends HepInstruction {
+/**
+ * Description to look for, or null if rule specified explicitly.
+ */
+String ruleDescription;
+
+/**
+ * Explicitly specified rule, or rule looked up by planner from
+ * description.
+ */
+RelOptRule rule;
+
+void initialize(boolean clearCache) {
+  if (!clearCache) {
+    return;
+  }
+
+  if (ruleDescription != null) {
+    // Look up anew each run.
+    rule = null;
+  }
+}
+//这里自然是HepPlanner
+void execute(HepPlanner planner) {
+  planner.executeInstruction(this);
+}
+}
+</pre></table></code></div></div><p>HepPlanner.executeInstruction<br />applyRules，看名字就是与配置的规则有关了</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+</pre><td class="rouge-code"><pre>void executeInstruction(
+  HepInstruction.RuleInstance instruction) {
+if (skippingGroup()) {
+  return;
+}
+if (instruction.rule == null) {
+  assert instruction.ruleDescription != null;
+  instruction.rule =
+      getRuleByDescription(instruction.ruleDescription);
+  LOGGER.trace("Looking up rule with description {}, found {}",
+      instruction.ruleDescription, instruction.rule);
+}
+//applyRules，看名字就是与配置的规则有关了
+if (instruction.rule != null) {
+  applyRules(
+      Collections.singleton(instruction.rule),
+      true);
+}
+}
+</pre></table></code></div></div><p>HepPlanner.applyRules</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+</pre><td class="rouge-code"><pre>private void applyRules(
+  Collection&lt;RelOptRule&gt; rules,
+  boolean forceConversions) {
+if (currentProgram.group != null) {
+  assert currentProgram.group.collecting;
+  currentProgram.group.ruleSet.addAll(rules);
+  return;
+}
+
+LOGGER.trace("Applying rule set {}", rules);
+
+boolean fullRestartAfterTransformation =
+    currentProgram.matchOrder != HepMatchOrder.ARBITRARY
+    &amp;&amp; currentProgram.matchOrder != HepMatchOrder.DEPTH_FIRST;
+
+int nMatches = 0;
+
+boolean fixedPoint;
+do {
+  Iterator&lt;HepRelVertex&gt; iter = getGraphIterator(root);
+  fixedPoint = true;
+  while (iter.hasNext()) {
+    HepRelVertex vertex = iter.next();
+    for (RelOptRule rule : rules) {
+      //
+      HepRelVertex newVertex =
+          applyRule(rule, vertex, forceConversions);
+      if (newVertex == null || newVertex == vertex) {
+        continue;
+      }
+      ++nMatches;
+      if (nMatches &gt;= currentProgram.matchLimit) {
+        return;
+      }
+      if (fullRestartAfterTransformation) {
+        iter = getGraphIterator(root);
+      } else {
+        // To the extent possible, pick up where we left
+        // off; have to create a new iterator because old
+        // one was invalidated by transformation.
+        iter = getGraphIterator(newVertex);
+        if (currentProgram.matchOrder == HepMatchOrder.DEPTH_FIRST) {
+          nMatches =
+              depthFirstApply(iter, rules, forceConversions, nMatches);
+          if (nMatches &gt;= currentProgram.matchLimit) {
+            return;
+          }
+        }
+        // Remember to go around again since we're
+        // skipping some stuff.
+        fixedPoint = false;
+      }
+      break;
+    }
+  }
+} while (!fixedPoint);
+}
+</pre></table></code></div></div><p>HepPlanner.applyRule<br />这里的规则是FilterIntoJoinRule，既不是ConverterRule也不是CommonRelSubExprRule类型</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+</pre><td class="rouge-code"><pre>  private HepRelVertex applyRule(
+      RelOptRule rule,
+      HepRelVertex vertex,
+      boolean forceConversions) {
+    if (!belongsToDag(vertex)) {
+      return null;
+    }
+    RelTrait parentTrait = null;
+    List&lt;RelNode&gt; parents = null;
+    if (rule instanceof ConverterRule) {
+      // Guaranteed converter rules require special casing to make sure
+      // they only fire where actually needed, otherwise they tend to
+      // fire to infinity and beyond.
+      ConverterRule converterRule = (ConverterRule) rule;
+      if (converterRule.isGuaranteed() || !forceConversions) {
+        if (!doesConverterApply(converterRule, vertex)) {
+          return null;
+        }
+        parentTrait = converterRule.getOutTrait();
+      }
+    } else if (rule instanceof CommonRelSubExprRule) {
+      // Only fire CommonRelSubExprRules if the vertex is a common
+      // subexpression.
+      List&lt;HepRelVertex&gt; parentVertices = getVertexParents(vertex);
+      if (parentVertices.size() &lt; 2) {
+        return null;
+      }
+      parents = new ArrayList&lt;&gt;();
+      for (HepRelVertex pVertex : parentVertices) {
+        parents.add(pVertex.getCurrentRel());
+      }
+    }
+
+    final List&lt;RelNode&gt; bindings = new ArrayList&lt;&gt;();
+    final Map&lt;RelNode, List&lt;RelNode&gt;&gt; nodeChildren = new HashMap&lt;&gt;();
+    boolean match =
+        matchOperands(
+            rule.getOperand(),
+            vertex.getCurrentRel(),
+            bindings,
+            nodeChildren);
+
+    if (!match) {
+      return null;
+    }
+
+    HepRuleCall call =
+        new HepRuleCall(
+            this,
+            rule.getOperand(),
+            bindings.toArray(new RelNode[0]),
+            nodeChildren,
+            parents);
+
+    // Allow the rule to apply its own side-conditions.
+    if (!rule.matches(call)) {
+      return null;
+    }
+	//规则在这里匹配出发
+    fireRule(call);
+
+    if (!call.getResults().isEmpty()) {
+      return applyTransformationResults(
+          vertex,
+          call,
+          parentTrait);
+    }
+
+    return null;
+  }
+</pre></table></code></div></div><p>AbstractRelOptPlanner.fireRule</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+</pre><td class="rouge-code"><pre>  protected void fireRule(
+      RelOptRuleCall ruleCall) {
+    checkCancel();
+
+    assert ruleCall.getRule().matches(ruleCall);
+    if (isRuleExcluded(ruleCall.getRule())) {
+      LOGGER.debug("call#{}: Rule [{}] not fired due to exclusion filter",
+          ruleCall.id, ruleCall.getRule());
+      return;
+    }
+
+    if (LOGGER.isDebugEnabled()) {
+      // Leave this wrapped in a conditional to prevent unnecessarily calling Arrays.toString(...)
+      LOGGER.debug("call#{}: Apply rule [{}] to {}",
+          ruleCall.id, ruleCall.getRule(), Arrays.toString(ruleCall.rels));
+    }
+
+    if (listener != null) {
+      RelOptListener.RuleAttemptedEvent event =
+          new RelOptListener.RuleAttemptedEvent(
+              this,
+              ruleCall.rel(0),
+              ruleCall,
+              true);
+      listener.ruleAttempted(event);
+    }
+	//匹配到规则FilterIntoJoinRule
+    ruleCall.getRule().onMatch(ruleCall);
+
+    if (listener != null) {
+      RelOptListener.RuleAttemptedEvent event =
+          new RelOptListener.RuleAttemptedEvent(
+              this,
+              ruleCall.rel(0),
+              ruleCall,
+              false);
+      listener.ruleAttempted(event);
+    }
+  }
+</pre></table></code></div></div><p>这里配置到之前配置的规则：FilterIntoJoinRule<br />分别取出filter和join后执行perform</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+</pre><td class="rouge-code"><pre>  public static class FilterIntoJoinRule extends FilterJoinRule {
+    public FilterIntoJoinRule(boolean smart,
+        RelBuilderFactory relBuilderFactory, Predicate predicate) {
+      super(
+          operand(Filter.class,
+              operand(Join.class, RelOptRule.any())),
+          "FilterJoinRule:filter", smart, relBuilderFactory,
+          predicate);
+    }
+
+    @Deprecated // to be removed before 2.0
+    public FilterIntoJoinRule(boolean smart,
+        RelFactories.FilterFactory filterFactory,
+        RelFactories.ProjectFactory projectFactory,
+        Predicate predicate) {
+      this(smart, RelBuilder.proto(filterFactory, projectFactory), predicate);
+    }
+	//分别取出filter和join
+    @Override public void onMatch(RelOptRuleCall call) {
+      Filter filter = call.rel(0);
+      Join join = call.rel(1);
+      perform(call, filter, join);
+    }
+  }
+</pre></table></code></div></div><p>perform由父类FilterJoinRule实现<br />代码比较长，主要是从左右两边表解析出filter<br />在生成RelNode：LogicalFilter,在重新生成joinRelNode：LogicalJoin</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+</pre><td class="rouge-code"><pre>  protected void perform(RelOptRuleCall call, Filter filter,
+      Join join) {
+    final List&lt;RexNode&gt; joinFilters =
+        RelOptUtil.conjunctions(join.getCondition());
+    final List&lt;RexNode&gt; origJoinFilters = ImmutableList.copyOf(joinFilters);
+
+    // If there is only the joinRel,
+    // make sure it does not match a cartesian product joinRel
+    // (with "true" condition), otherwise this rule will be applied
+    // again on the new cartesian product joinRel.
+    if (filter == null &amp;&amp; joinFilters.isEmpty()) {
+      return;
+    }
+
+    final List&lt;RexNode&gt; aboveFilters =
+        filter != null
+            ? conjunctions(filter.getCondition())
+            : new ArrayList&lt;&gt;();
+    final ImmutableList&lt;RexNode&gt; origAboveFilters =
+        ImmutableList.copyOf(aboveFilters);
+
+    // Simplify Outer Joins
+    JoinRelType joinType = join.getJoinType();
+    if (smart
+        &amp;&amp; !origAboveFilters.isEmpty()
+        &amp;&amp; join.getJoinType() != JoinRelType.INNER) {
+      joinType = RelOptUtil.simplifyJoin(join, origAboveFilters, joinType);
+    }
+
+    final List&lt;RexNode&gt; leftFilters = new ArrayList&lt;&gt;();
+    final List&lt;RexNode&gt; rightFilters = new ArrayList&lt;&gt;();
+
+    // TODO - add logic to derive additional filters.  E.g., from
+    // (t1.a = 1 AND t2.a = 2) OR (t1.b = 3 AND t2.b = 4), you can
+    // derive table filters:
+    // (t1.a = 1 OR t1.b = 3)
+    // (t2.a = 2 OR t2.b = 4)
+
+    // Try to push down above filters. These are typically where clause
+    // filters. They can be pushed down if they are not on the NULL
+    // generating side.
+    boolean filterPushed = false;
+    if (RelOptUtil.classifyFilters(
+        join,
+        aboveFilters,
+        joinType,
+        !(join instanceof EquiJoin),
+        !joinType.generatesNullsOnLeft(),
+        !joinType.generatesNullsOnRight(),
+        joinFilters,
+        leftFilters,
+        rightFilters)) {
+      filterPushed = true;
+    }
+
+    // Move join filters up if needed
+    validateJoinFilters(aboveFilters, joinFilters, join, joinType);
+
+    // If no filter got pushed after validate, reset filterPushed flag
+    if (leftFilters.isEmpty()
+        &amp;&amp; rightFilters.isEmpty()
+        &amp;&amp; joinFilters.size() == origJoinFilters.size()) {
+      if (Sets.newHashSet(joinFilters)
+          .equals(Sets.newHashSet(origJoinFilters))) {
+        filterPushed = false;
+      }
+    }
+
+    // Try to push down filters in ON clause. A ON clause filter can only be
+    // pushed down if it does not affect the non-matching set, i.e. it is
+    // not on the side which is preserved.
+    if (RelOptUtil.classifyFilters(
+        join,
+        joinFilters,
+        joinType,
+        false,
+        !joinType.generatesNullsOnRight(),
+        !joinType.generatesNullsOnLeft(),
+        joinFilters,
+        leftFilters,
+        rightFilters)) {
+      filterPushed = true;
+    }
+
+    // if nothing actually got pushed and there is nothing leftover,
+    // then this rule is a no-op
+    if ((!filterPushed
+            &amp;&amp; joinType == join.getJoinType())
+        || (joinFilters.isEmpty()
+            &amp;&amp; leftFilters.isEmpty()
+            &amp;&amp; rightFilters.isEmpty())) {
+      return;
+    }
+
+    // create Filters on top of the children if any filters were
+    // pushed to them
+    //生成左右表LogicalFilter节点
+    final RexBuilder rexBuilder = join.getCluster().getRexBuilder();
+    final RelBuilder relBuilder = call.builder();
+    final RelNode leftRel =
+        relBuilder.push(join.getLeft()).filter(leftFilters).build();
+    final RelNode rightRel =
+        relBuilder.push(join.getRight()).filter(rightFilters).build();
+
+    // create the new join node referencing the new children and
+    // containing its new join filters (if there are any)
+    final ImmutableList&lt;RelDataType&gt; fieldTypes =
+        ImmutableList.&lt;RelDataType&gt;builder()
+            .addAll(RelOptUtil.getFieldTypeList(leftRel.getRowType()))
+            .addAll(RelOptUtil.getFieldTypeList(rightRel.getRowType())).build();
+    final RexNode joinFilter =
+        RexUtil.composeConjunction(rexBuilder,
+            RexUtil.fixUp(rexBuilder, joinFilters, fieldTypes));
+
+    // If nothing actually got pushed and there is nothing leftover,
+    // then this rule is a no-op
+    if (joinFilter.isAlwaysTrue()
+        &amp;&amp; leftFilters.isEmpty()
+        &amp;&amp; rightFilters.isEmpty()
+        &amp;&amp; joinType == join.getJoinType()) {
+      return;
+    }
+	//重新生成LogicalJoin
+    RelNode newJoinRel =
+        join.copy(
+            join.getTraitSet(),
+            joinFilter,
+            leftRel,
+            rightRel,
+            joinType,
+            join.isSemiJoinDone());
+    call.getPlanner().onCopy(join, newJoinRel);
+    if (!leftFilters.isEmpty()) {
+      call.getPlanner().onCopy(filter, leftRel);
+    }
+    if (!rightFilters.isEmpty()) {
+      call.getPlanner().onCopy(filter, rightRel);
+    }
+
+    relBuilder.push(newJoinRel);
+
+    // Create a project on top of the join if some of the columns have become
+    // NOT NULL due to the join-type getting stricter.
+    //生成LogicalProject
+    relBuilder.convert(join.getRowType(), false);
+
+    // create a FilterRel on top of the join if needed
+    relBuilder.filter(
+        RexUtil.fixUp(rexBuilder, aboveFilters,
+            RelOptUtil.getFieldTypeList(relBuilder.peek().getRowType())));
+
+    call.transformTo(relBuilder.build());
+  }
+</pre></table></code></div></div><p>HepPlanner.applyTransformationResults<br />用新的LogicalJoin替换掉原LogicFilter，添加到 HepPlanner 的 graph 新DAG</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+</pre><td class="rouge-code"><pre>  private HepRelVertex applyTransformationResults(
+      HepRelVertex vertex,
+      HepRuleCall call,
+      RelTrait parentTrait) {
+    // TODO jvs 5-Apr-2006:  Take the one that gives the best
+    // global cost rather than the best local cost.  That requires
+    // "tentative" graph edits.
+
+    assert !call.getResults().isEmpty();
+
+    RelNode bestRel = null;
+
+    if (call.getResults().size() == 1) {
+      // No costing required; skip it to minimize the chance of hitting
+      // rels without cost information.
+      bestRel = call.getResults().get(0);
+    } else {
+      RelOptCost bestCost = null;
+      final RelMetadataQuery mq = call.getMetadataQuery();
+      for (RelNode rel : call.getResults()) {
+        RelOptCost thisCost = getCost(rel, mq);
+        if (LOGGER.isTraceEnabled()) {
+          // Keep in the isTraceEnabled for the getRowCount method call
+          LOGGER.trace("considering {} with cumulative cost={} and rowcount={}",
+              rel, thisCost, mq.getRowCount(rel));
+        }
+        if ((bestRel == null) || thisCost.isLt(bestCost)) {
+          bestRel = rel;
+          bestCost = thisCost;
+        }
+      }
+    }
+
+    ++nTransformations;
+    notifyTransformation(
+        call,
+        bestRel,
+        true);
+
+    // Before we add the result, make a copy of the list of vertex's
+    // parents.  We'll need this later during contraction so that
+    // we only update the existing parents, not the new parents
+    // (otherwise loops can result).  Also take care of filtering
+    // out parents by traits in case we're dealing with a converter rule.
+    final List&lt;HepRelVertex&gt; allParents =
+        Graphs.predecessorListOf(graph, vertex);
+    final List&lt;HepRelVertex&gt; parents = new ArrayList&lt;&gt;();
+    for (HepRelVertex parent : allParents) {
+      if (parentTrait != null) {
+        RelNode parentRel = parent.getCurrentRel();
+        if (parentRel instanceof Converter) {
+          // We don't support automatically chaining conversions.
+          // Treating a converter as a candidate parent here
+          // can cause the "iParentMatch" check below to
+          // throw away a new converter needed in
+          // the multi-parent DAG case.
+          continue;
+        }
+        if (!parentRel.getTraitSet().contains(parentTrait)) {
+          // This parent does not want the converted result.
+          continue;
+        }
+      }
+      parents.add(parent);
+    }
+
+    HepRelVertex newVertex = addRelToGraph(bestRel);
+
+    // There's a chance that newVertex is the same as one
+    // of the parents due to common subexpression recognition
+    // (e.g. the LogicalProject added by JoinCommuteRule).  In that
+    // case, treat the transformation as a nop to avoid
+    // creating a loop.
+    int iParentMatch = parents.indexOf(newVertex);
+    if (iParentMatch != -1) {
+      newVertex = parents.get(iParentMatch);
+    } else {
+      contractVertices(newVertex, vertex, parents);
+    }
+
+    if (getListener() != null) {
+      // Assume listener doesn't want to see garbage.
+      collectGarbage();
+    }
+
+    notifyTransformation(
+        call,
+        bestRel,
+        false);
+
+    dumpGraph();
+
+    return newVertex;
+  }
+</pre></table></code></div></div><p>规则<br />FlinkStreamProgram<br />FlinkVolcanoProgram主要两个FlinkStreamRuleSets.LOGICAL_OPT_RULES,<br />FlinkStreamRuleSets.PHYSICAL_OPT_RULE<br />别看只有两个，这都是代表一系列的规则</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+</pre><td class="rouge-code"><pre>// optimize the logical plan
+chainedProgram.addLast(
+  LOGICAL,
+  FlinkVolcanoProgramBuilder.newBuilder
+    .add(FlinkStreamRuleSets.LOGICAL_OPT_RULES)
+    .setRequiredOutputTraits(Array(FlinkConventions.LOGICAL))
+    .build()
+)
+// optimize the physical plan
+chainedProgram.addLast(
+  PHYSICAL,
+  FlinkVolcanoProgramBuilder.newBuilder
+    .add(FlinkStreamRuleSets.PHYSICAL_OPT_RULES)
+    .setRequiredOutputTraits(Array(FlinkConventions.STREAM_PHYSICAL))
+    .build()
+)
+</pre></table></code></div></div><p>逻辑执行计划<br />LOGICAL_CONVERTERS负责转换RelNode到FlinkLogicalRel转换</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+</pre><td class="rouge-code"><pre>/** RuleSet to do logical optimize for stream */
+val LOGICAL_OPT_RULES: RuleSet = RuleSets.ofList(
+(
+  FILTER_RULES.asScala ++
+    PROJECT_RULES.asScala ++
+    PRUNE_EMPTY_RULES.asScala ++
+    LOGICAL_RULES.asScala ++
+    LOGICAL_CONVERTERS.asScala//转换RelNode --&gt;FlinkLogicalRel
+).asJava)
+</pre></table></code></div></div><p>LOGICAL_CONVERTERS</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+</pre><td class="rouge-code"><pre>/** RuleSet to translate calcite nodes to flink nodes */
+private val LOGICAL_CONVERTERS: RuleSet = RuleSets.ofList(
+// translate to flink logical rel nodes
+FlinkLogicalAggregate.STREAM_CONVERTER,
+FlinkLogicalTableAggregate.CONVERTER,
+FlinkLogicalOverAggregate.CONVERTER,
+FlinkLogicalCalc.CONVERTER,
+FlinkLogicalCorrelate.CONVERTER,
+FlinkLogicalJoin.CONVERTER,
+FlinkLogicalSort.STREAM_CONVERTER,
+FlinkLogicalUnion.CONVERTER,
+FlinkLogicalValues.CONVERTER,
+FlinkLogicalTableSourceScan.CONVERTER,
+FlinkLogicalLegacyTableSourceScan.CONVERTER,
+FlinkLogicalTableFunctionScan.CONVERTER,
+FlinkLogicalDataStreamTableScan.CONVERTER,
+FlinkLogicalIntermediateTableScan.CONVERTER,
+FlinkLogicalExpand.CONVERTER,
+FlinkLogicalRank.CONVERTER,
+FlinkLogicalWatermarkAssigner.CONVERTER,
+FlinkLogicalWindowAggregate.CONVERTER,
+FlinkLogicalWindowTableAggregate.CONVERTER,
+FlinkLogicalSnapshot.CONVERTER,
+FlinkLogicalMatch.CONVERTER,
+FlinkLogicalSink.CONVERTER,
+FlinkLogicalLegacySink.CONVERTER
+)
+</pre></table></code></div></div><p>比如FlinkLogicalJoinConverter负责join的转换<br />即join RelNode–&gt;FlinkLogicalJoin</p><div class="language-plaintext highlighter-rouge"><div class="code-header"> <span data-label-text="Plaintext"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+</pre><td class="rouge-code"><pre>/** Support all joins. */
+private class FlinkLogicalJoinConverter
+  extends ConverterRule(
+    classOf[LogicalJoin],
+    Convention.NONE,
+    FlinkConventions.LOGICAL,
+    "FlinkLogicalJoinConverter") {
+
+  override def convert(rel: RelNode): RelNode = {
+    val join = rel.asInstanceOf[LogicalJoin]
+    val newLeft = RelOptRule.convert(join.getLeft, FlinkConventions.LOGICAL)
+    val newRight = RelOptRule.convert(join.getRight, FlinkConventions.LOGICAL)
+    FlinkLogicalJoin.create(newLeft, newRight, join.getCondition, join.getHints, join.getJoinType)
+  }
+}
+
+object FlinkLogicalJoin {
+  val CONVERTER: ConverterRule = new FlinkLogicalJoinConverter
+//创建FlinkLogicalJoin
+  def create(
+      left: RelNode,
+      right: RelNode,
+      conditionExpr: RexNode,
+      hints: JList[RelHint],
+      joinType: JoinRelType): FlinkLogicalJoin = {
+    val cluster = left.getCluster
+    val traitSet = cluster.traitSetOf(FlinkConventions.LOGICAL).simplify()
+    new FlinkLogicalJoin(cluster, traitSet, left, right, conditionExpr, hints, joinType)
+  }
+}
+</pre></table></code></div></div></div><div class="post-tail-wrapper text-muted"><div class="post-meta mb-3"> <i class="far fa-folder-open fa-fw mr-1"></i> <a href='/categories/flink1-15/'>Flink1.15</a></div><div class="post-tags"> <i class="fa fa-tags fa-fw mr-1"></i> <a href="/tags/flink/" class="post-tag no-text-decoration" >flink</a> <a href="/tags/calcite/" class="post-tag no-text-decoration" >Calcite</a> <a href="/tags/realtime/" class="post-tag no-text-decoration" >realtime</a></div><div class="post-tail-bottom d-flex justify-content-between align-items-center mt-3 pt-5 pb-2"><div class="license-wrapper"> This post is licensed under <a href="https://creativecommons.org/licenses/by/4.0/"> CC BY 4.0 </a> by the author.</div><div class="share-wrapper"> <span class="share-label text-muted mr-1">Share</span> <span class="share-icons"> <a href="https://twitter.com/intent/tweet?text=FlinkSQL%28Flink1.15%29%E8%A7%84%E5%88%99%E4%BC%98%E5%8C%96%E4%BB%A5%E5%8F%8ACalcite%E5%8E%9F%E7%90%86+-+2pc&url=%2Fposts%2Fcalcite_rule%2F" data-toggle="tooltip" data-placement="top" title="Twitter" target="_blank" rel="noopener" aria-label="Twitter"> <i class="fa-fw fab fa-twitter"></i> </a> <a href="https://www.facebook.com/sharer/sharer.php?title=FlinkSQL%28Flink1.15%29%E8%A7%84%E5%88%99%E4%BC%98%E5%8C%96%E4%BB%A5%E5%8F%8ACalcite%E5%8E%9F%E7%90%86+-+2pc&u=%2Fposts%2Fcalcite_rule%2F" data-toggle="tooltip" data-placement="top" title="Facebook" target="_blank" rel="noopener" aria-label="Facebook"> <i class="fa-fw fab fa-facebook-square"></i> </a> <a href="https://t.me/share/url?url=%2Fposts%2Fcalcite_rule%2F&text=FlinkSQL%28Flink1.15%29%E8%A7%84%E5%88%99%E4%BC%98%E5%8C%96%E4%BB%A5%E5%8F%8ACalcite%E5%8E%9F%E7%90%86+-+2pc" data-toggle="tooltip" data-placement="top" title="Telegram" target="_blank" rel="noopener" aria-label="Telegram"> <i class="fa-fw fab fa-telegram"></i> </a> <i id="copy-link" class="fa-fw fas fa-link small" data-toggle="tooltip" data-placement="top" title="Copy link" data-title-succeed="Link copied successfully!"> </i> </span></div></div></div></div></div><div id="panel-wrapper" class="col-xl-3 pl-2 text-muted"><div class="access"><div id="access-lastmod" class="post"><div class="panel-heading">Recently Updated</div><ul class="post-content pl-0 pb-1 ml-1 mt-2"><li><a href="/posts/dubbo_threadpool/">Dubbo线程池问题汇总</a><li><a href="/posts/rocketMQ_max_maxReconsumeTimes/">RocketMQ 最大消费次数maxReconsumeTimes</a><li><a href="/posts/CF_forkjoin/">CompletableFuture与ForkJoinPool</a><li><a href="/posts/Elasticsearch-notes/">Elasticsearch笔记</a><li><a href="/posts/Solr5/">Solr5.x &&SolrCloud</a></ul></div><div id="access-tags"><div class="panel-heading">Trending Tags</div><div class="d-flex flex-wrap mt-3 mb-1 mr-3"> <a class="post-tag" href="/tags/realtime/">realtime</a> <a class="post-tag" href="/tags/flink/">flink</a> <a class="post-tag" href="/tags/distributed/">distributed</a> <a class="post-tag" href="/tags/java/">Java</a> <a class="post-tag" href="/tags/datascience/">Datascience</a> <a class="post-tag" href="/tags/ml/">ML</a> <a class="post-tag" href="/tags/python/">python</a> <a class="post-tag" href="/tags/streamsets/">streamsets</a> <a class="post-tag" href="/tags/search/">Search</a> <a class="post-tag" href="/tags/file/">File</a></div></div></div></div></div><div class="row"><div id="tail-wrapper" class="col-12 col-lg-11 col-xl-9 pl-3 pr-3 pr-xl-4"><div id="related-posts" class="mt-5 mb-2 mb-sm-4"><h3 class="pt-2 mt-1 mb-4 ml-1" data-toc-skip>Further Reading</h3><div class="card-deck mb-4"><div class="card"> <a href="/posts/flink_svg/"><div class="card-body"> <em class="small" data-ts="1663545600" data-df="ll" > Sep 19, 2022 </em><h3 class="pt-0 mt-1 mb-3" data-toc-skip>Flink流程图整理以及画图模板</h3><div class="text-muted small"><p> [drawio项目文件地址]（https://github.com/2pc/mydrawio） Checkpoint流程 启动流程 FlinkSQL Flink Slot管理 画图模板 画图模板PNG</p></div></div></a></div><div class="card"> <a href="/posts/slot/"><div class="card-body"> <em class="small" data-ts="1660003200" data-df="ll" > Aug 9, 2022 </em><h3 class="pt-0 mt-1 mb-3" data-toc-skip>Flink1.15 SLOT源码分析</h3><div class="text-muted small"><p> Flink Slot管理 JobMaster继承了RpcEndpoint，start的回调Onstart protected void onStart() throws JobMasterException { try { startJobExecution(); } catch (Exception e) { final JobMaster...</p></div></div></a></div><div class="card"> <a href="/posts/master/"><div class="card-body"> <em class="small" data-ts="1660608000" data-df="ll" > Aug 16, 2022 </em><h3 class="pt-0 mt-1 mb-3" data-toc-skip>Flink1.15 JobMaster源码分析</h3><div class="text-muted small"><p> 启动流程 dispatcher.start();调用start后回调onStart public final void start() { rpcServer.start(); } StandaloneDispatcher继承自Dispatcher public class StandaloneDispatcher extends Dispatcher ...</p></div></div></a></div></div></div><div class="post-navigation d-flex justify-content-between"> <a href="/posts/master/" class="btn btn-outline-primary" prompt="Older"><p>Flink1.15 JobMaster源码分析</p></a> <a href="/posts/FLINKSQL/" class="btn btn-outline-primary" prompt="Newer"><p>FlinkSQL(Flink1.15/1.16)源码分析</p></a></div></div></div><footer class="row pl-3 pr-3"><div class="col-12 d-flex justify-content-between align-items-center text-muted pl-0 pr-0"><div class="footer-left"><p class="mb-0"> © 2023 <a href="https://twitter.com/2pc">2pc</a>. <span data-toggle="tooltip" data-placement="top" title="Except where otherwise noted, the blog posts on this site are licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0) License by the author.">Some rights reserved.</span></p></div><div class="footer-right"><p class="mb-0"> Powered by <a href="https://jekyllrb.com" target="_blank" rel="noopener">Jekyll</a> with <a href="https://github.com/cotes2020/jekyll-theme-chirpy" target="_blank" rel="noopener">Chirpy</a> theme.</p></div></div></footer></div><div id="search-result-wrapper" class="d-flex justify-content-center unloaded"><div class="col-12 col-sm-11 post-content"><div id="search-hints"><div id="access-tags"><div class="panel-heading">Trending Tags</div><div class="d-flex flex-wrap mt-3 mb-1 mr-3"> <a class="post-tag" href="/tags/realtime/">realtime</a> <a class="post-tag" href="/tags/flink/">flink</a> <a class="post-tag" href="/tags/distributed/">distributed</a> <a class="post-tag" href="/tags/java/">Java</a> <a class="post-tag" href="/tags/datascience/">Datascience</a> <a class="post-tag" href="/tags/ml/">ML</a> <a class="post-tag" href="/tags/python/">python</a> <a class="post-tag" href="/tags/streamsets/">streamsets</a> <a class="post-tag" href="/tags/search/">Search</a> <a class="post-tag" href="/tags/file/">File</a></div></div></div><div id="search-results" class="d-flex flex-wrap justify-content-center text-muted mt-3"></div></div></div></div><div id="mask"></div><a id="back-to-top" href="#" aria-label="back-to-top" class="btn btn-lg btn-box-shadow" role="button"> <i class="fas fa-angle-up"></i> </a><div id="notification" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-animation="true" data-autohide="false"><div class="toast-header"> <button type="button" class="ml-2 ml-auto close" data-dismiss="toast" aria-label="Close"> <span aria-hidden="true">&times;</span> </button></div><div class="toast-body text-center pt-0"><p class="pl-2 pr-2 mb-3">A new version of content is available.</p><button type="button" class="btn btn-primary" aria-label="Update"> Update </button></div></div><script src="https://cdn.jsdelivr.net/npm/simple-jekyll-search@1.10.0/dest/simple-jekyll-search.min.js"></script> <script> SimpleJekyllSearch({ searchInput: document.getElementById('search-input'), resultsContainer: document.getElementById('search-results'), json: '/assets/js/data/search.json', searchResultTemplate: '<div class="pl-1 pr-1 pl-sm-2 pr-sm-2 pl-lg-4 pr-lg-4 pl-xl-0 pr-xl-0"> <a href="{url}">{title}</a><div class="post-meta d-flex flex-column flex-sm-row text-muted mt-1 mb-1"> {categories} {tags}</div><p>{snippet}</p></div>', noResultsText: '<p class="mt-5">Oops! No results found.</p>', templateMiddleware: function(prop, value, template) { if (prop === 'categories') { if (value === '') { return `${value}`; } else { return `<div class="mr-sm-4"><i class="far fa-folder fa-fw"></i>${value}</div>`; } } if (prop === 'tags') { if (value === '') { return `${value}`; } else { return `<div><i class="fa fa-tag fa-fw"></i>${value}</div>`; } } } }); </script> <script src="https://cdn.jsdelivr.net/combine/npm/magnific-popup@1/dist/jquery.magnific-popup.min.js,npm/lozad/dist/lozad.min.js,npm/clipboard@2/dist/clipboard.min.js"></script> <script src="https://cdn.jsdelivr.net/combine/npm/dayjs@1/dayjs.min.js,npm/dayjs@1/locale/en.min.js,npm/dayjs@1/plugin/relativeTime.min.js,npm/dayjs@1/plugin/localizedFormat.min.js"></script> <script defer src="/assets/js/dist/post.min.js"></script> <script src="https://cdn.jsdelivr.net/npm/bootstrap@4/dist/js/bootstrap.bundle.min.js"></script> <script defer src="/app.js"></script>

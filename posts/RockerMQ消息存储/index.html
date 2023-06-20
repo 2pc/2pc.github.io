@@ -1,0 +1,793 @@
+<!DOCTYPE html><html lang="en" ><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"><meta name="generator" content="Jekyll v4.2.2" /><meta property="og:title" content="RocketMQ 消息存储" /><meta property="og:locale" content="en" /><meta name="description" content="BrokerController初始化的时候实例化一个DefaultMessageStore，并且负责load文件 ```go //BrokerController.initialize() this.messageStore = new DefaultMessageStore(this.messageStoreConfig, this.brokerStatsManager, this.messageArrivingListener, this.brokerConfig); //加载 result = result &amp;&amp; this.messageStore.load();" /><meta property="og:description" content="BrokerController初始化的时候实例化一个DefaultMessageStore，并且负责load文件 ```go //BrokerController.initialize() this.messageStore = new DefaultMessageStore(this.messageStoreConfig, this.brokerStatsManager, this.messageArrivingListener, this.brokerConfig); //加载 result = result &amp;&amp; this.messageStore.load();" /><link rel="canonical" href="/posts/RockerMQ%E6%B6%88%E6%81%AF%E5%AD%98%E5%82%A8/" /><meta property="og:url" content="/posts/RockerMQ%E6%B6%88%E6%81%AF%E5%AD%98%E5%82%A8/" /><meta property="og:site_name" content="2pc" /><meta property="og:type" content="article" /><meta property="article:published_time" content="2022-06-29T00:00:00+00:00" /><meta name="twitter:card" content="summary" /><meta property="twitter:title" content="RocketMQ 消息存储" /><meta name="twitter:site" content="@2pc" /> <script type="application/ld+json"> {"@context":"https://schema.org","@type":"BlogPosting","dateModified":"2022-10-17T12:13:57+00:00","datePublished":"2022-06-29T00:00:00+00:00","description":"BrokerController初始化的时候实例化一个DefaultMessageStore，并且负责load文件 ```go //BrokerController.initialize() this.messageStore = new DefaultMessageStore(this.messageStoreConfig, this.brokerStatsManager, this.messageArrivingListener, this.brokerConfig); //加载 result = result &amp;&amp; this.messageStore.load();","headline":"RocketMQ 消息存储","mainEntityOfPage":{"@type":"WebPage","@id":"/posts/RockerMQ%E6%B6%88%E6%81%AF%E5%AD%98%E5%82%A8/"},"url":"/posts/RockerMQ%E6%B6%88%E6%81%AF%E5%AD%98%E5%82%A8/"}</script><title>RocketMQ 消息存储 | 2pc</title><link rel="apple-touch-icon" sizes="180x180" href="/assets/img/favicons/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicons/favicon-32x32.png"><link rel="icon" type="image/png" sizes="16x16" href="/assets/img/favicons/favicon-16x16.png"><link rel="manifest" href="/assets/img/favicons/site.webmanifest"><link rel="shortcut icon" href="/assets/img/favicons/favicon.ico"><meta name="apple-mobile-web-app-title" content="2pc"><meta name="application-name" content="2pc"><meta name="msapplication-TileColor" content="#da532c"><meta name="msapplication-config" content="/assets/img/favicons/browserconfig.xml"><meta name="theme-color" content="#ffffff"><link rel="preconnect" href="https://fonts.googleapis.com" ><link rel="dns-prefetch" href="https://fonts.googleapis.com" ><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.gstatic.com" crossorigin><link rel="preconnect" href="https://fonts.googleapis.com" ><link rel="dns-prefetch" href="https://fonts.googleapis.com" ><link rel="preconnect" href="https://cdn.jsdelivr.net" ><link rel="dns-prefetch" href="https://cdn.jsdelivr.net" ><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato&family=Source+Sans+Pro:wght@400;600;700;900&display=swap"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4/dist/css/bootstrap.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.11.2/css/all.min.css"><link rel="stylesheet" href="/assets/css/style.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/afeld/bootstrap-toc@1.0.1/dist/bootstrap-toc.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/magnific-popup@1/dist/magnific-popup.min.css"> <script src="https://cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script> <script type="text/javascript"> class ModeToggle { static get MODE_KEY() { return "mode"; } static get MODE_ATTR() { return "data-mode"; } static get DARK_MODE() { return "dark"; } static get LIGHT_MODE() { return "light"; } static get ID() { return "mode-toggle"; } constructor() { if (this.hasMode) { if (this.isDarkMode) { if (!this.isSysDarkPrefer) { this.setDark(); } } else { if (this.isSysDarkPrefer) { this.setLight(); } } } let self = this; /* always follow the system prefers */ this.sysDarkPrefers.addEventListener("change", () => { if (self.hasMode) { if (self.isDarkMode) { if (!self.isSysDarkPrefer) { self.setDark(); } } else { if (self.isSysDarkPrefer) { self.setLight(); } } self.clearMode(); } self.notify(); }); } /* constructor() */ get sysDarkPrefers() { return window.matchMedia("(prefers-color-scheme: dark)"); } get isSysDarkPrefer() { return this.sysDarkPrefers.matches; } get isDarkMode() { return this.mode === ModeToggle.DARK_MODE; } get isLightMode() { return this.mode === ModeToggle.LIGHT_MODE; } get hasMode() { return this.mode != null; } get mode() { return sessionStorage.getItem(ModeToggle.MODE_KEY); } /* get the current mode on screen */ get modeStatus() { if (this.isDarkMode || (!this.hasMode && this.isSysDarkPrefer)) { return ModeToggle.DARK_MODE; } else { return ModeToggle.LIGHT_MODE; } } setDark() { $('html').attr(ModeToggle.MODE_ATTR, ModeToggle.DARK_MODE); sessionStorage.setItem(ModeToggle.MODE_KEY, ModeToggle.DARK_MODE); } setLight() { $('html').attr(ModeToggle.MODE_ATTR, ModeToggle.LIGHT_MODE); sessionStorage.setItem(ModeToggle.MODE_KEY, ModeToggle.LIGHT_MODE); } clearMode() { $('html').removeAttr(ModeToggle.MODE_ATTR); sessionStorage.removeItem(ModeToggle.MODE_KEY); } /* Notify another plugins that the theme mode has changed */ notify() { window.postMessage({ direction: ModeToggle.ID, message: this.modeStatus }, "*"); } } /* ModeToggle */ const toggle = new ModeToggle(); function flipMode() { if (toggle.hasMode) { if (toggle.isSysDarkPrefer) { if (toggle.isLightMode) { toggle.clearMode(); } else { toggle.setLight(); } } else { if (toggle.isDarkMode) { toggle.clearMode(); } else { toggle.setDark(); } } } else { if (toggle.isSysDarkPrefer) { toggle.setLight(); } else { toggle.setDark(); } } toggle.notify(); } /* flipMode() */ </script><body data-spy="scroll" data-target="#toc" data-topbar-visible="true"><div id="sidebar" class="d-flex flex-column align-items-end"><div class="profile-wrapper text-center"><div id="avatar"> <a href="/" class="mx-auto"> <img src="/assets/sample/avatar.jpg" alt="avatar" onerror="this.style.display='none'"> </a></div><div class="site-title mt-3"> <a href="/">2pc</a></div><div class="site-subtitle font-italic">A text-focused Jekyll theme</div></div><ul class="w-100"><li class="nav-item"> <a href="/" class="nav-link"> <i class="fa-fw fas fa-home ml-xl-3 mr-xl-3 unloaded"></i> <span>HOME</span> </a><li class="nav-item"> <a href="/categories/" class="nav-link"> <i class="fa-fw fas fa-stream ml-xl-3 mr-xl-3 unloaded"></i> <span>CATEGORIES</span> </a><li class="nav-item"> <a href="/tags/" class="nav-link"> <i class="fa-fw fas fa-tag ml-xl-3 mr-xl-3 unloaded"></i> <span>TAGS</span> </a><li class="nav-item"> <a href="/archives/" class="nav-link"> <i class="fa-fw fas fa-archive ml-xl-3 mr-xl-3 unloaded"></i> <span>ARCHIVES</span> </a><li class="nav-item"> <a href="/about/" class="nav-link"> <i class="fa-fw fas fa-info-circle ml-xl-3 mr-xl-3 unloaded"></i> <span>ABOUT</span> </a></ul><div class="sidebar-bottom mt-auto d-flex flex-wrap justify-content-center align-items-center"> <button class="mode-toggle btn" aria-label="Switch Mode"> <i class="fas fa-adjust"></i> </button> <span class="icon-border"></span> <a href="https://github.com/2pc" aria-label="github" target="_blank" rel="noopener"> <i class="fab fa-github"></i> </a> <a href="https://twitter.com/2pc" aria-label="twitter" target="_blank" rel="noopener"> <i class="fab fa-twitter"></i> </a> <a href=" javascript:location.href = 'mailto:' + ['2pcgithub','gmail.com'].join('@')" aria-label="email" > <i class="fas fa-envelope"></i> </a> <a href="/feed.xml" aria-label="rss" > <i class="fas fa-rss"></i> </a></div></div><div id="topbar-wrapper"><div id="topbar" class="container d-flex align-items-center justify-content-between h-100 pl-3 pr-3 pl-md-4 pr-md-4"> <span id="breadcrumb"> <span> <a href="/"> Home </a> </span> <span>RocketMQ 消息存储</span> </span> <i id="sidebar-trigger" class="fas fa-bars fa-fw"></i><div id="topbar-title"> Post</div><i id="search-trigger" class="fas fa-search fa-fw"></i> <span id="search-wrapper" class="align-items-center"> <i class="fas fa-search fa-fw"></i> <input class="form-control" id="search-input" type="search" aria-label="search" autocomplete="off" placeholder="Search..."> </span> <span id="search-cancel" >Cancel</span></div></div><div id="main-wrapper" class="d-flex justify-content-center"><div id="main" class="container pl-xl-4 pr-xl-4"><div class="row"><div id="core-wrapper" class="col-12 col-lg-11 col-xl-9 pr-xl-4"><div class="post pl-1 pr-1 pl-md-2 pr-md-2"><h1 data-toc-skip>RocketMQ 消息存储</h1><div class="post-meta text-muted"> <span> Posted <em class="" data-ts="1656460800" data-df="ll" data-toggle="tooltip" data-placement="bottom"> Jun 29, 2022 </em> </span> <span> Updated <em class="" data-ts="1666008837" data-df="ll" data-toggle="tooltip" data-placement="bottom"> Oct 17, 2022 </em> </span><div class="d-flex justify-content-between"> <span> By <em> <a href="https://twitter.com/2pc">2pc</a> </em> </span><div> <span class="readtime" data-toggle="tooltip" data-placement="bottom" title="2226 words"> <em>12 min</em> read</span></div></div></div><div class="post-content"><p>BrokerController初始化的时候实例化一个DefaultMessageStore，并且负责load文件</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+</pre><td class="rouge-code"><pre><span class="c">//BrokerController.initialize()</span>
+<span class="n">this</span><span class="o">.</span><span class="n">messageStore</span> <span class="o">=</span>
+<span class="nb">new</span> <span class="n">DefaultMessageStore</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">messageStoreConfig</span><span class="p">,</span> <span class="n">this</span><span class="o">.</span><span class="n">brokerStatsManager</span><span class="p">,</span> <span class="n">this</span><span class="o">.</span><span class="n">messageArrivingListener</span><span class="p">,</span>
+                        <span class="n">this</span><span class="o">.</span><span class="n">brokerConfig</span><span class="p">);</span>
+<span class="c">//加载</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">result</span> <span class="o">&amp;&amp;</span> <span class="n">this</span><span class="o">.</span><span class="n">messageStore</span><span class="o">.</span><span class="n">load</span><span class="p">();</span>
+
+</pre></table></code></div></div><p>加载</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+</pre><td class="rouge-code"><pre><span class="c">//DefaultMessageStore.load</span>
+<span class="n">public</span> <span class="n">boolean</span> <span class="n">load</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">boolean</span> <span class="n">result</span> <span class="o">=</span> <span class="no">true</span><span class="p">;</span>
+
+    <span class="n">try</span> <span class="p">{</span>
+        <span class="n">boolean</span> <span class="n">lastExitOK</span> <span class="o">=</span> <span class="o">!</span><span class="n">this</span><span class="o">.</span><span class="n">isTempFileExist</span><span class="p">();</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">"last shutdown {}"</span><span class="p">,</span> <span class="n">lastExitOK</span> <span class="err">?</span> <span class="s">"normally"</span> <span class="o">:</span> <span class="s">"abnormally"</span><span class="p">);</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">null</span> <span class="o">!=</span> <span class="n">scheduleMessageService</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">result</span> <span class="o">&amp;&amp;</span> <span class="n">this</span><span class="o">.</span><span class="n">scheduleMessageService</span><span class="o">.</span><span class="n">load</span><span class="p">();</span>
+        <span class="p">}</span>
+
+        <span class="c">// load Commit Log 加载commitlog</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">result</span> <span class="o">&amp;&amp;</span> <span class="n">this</span><span class="o">.</span><span class="n">commitLog</span><span class="o">.</span><span class="n">load</span><span class="p">();</span>
+
+        <span class="c">// load Consume Queue 加载Consume Queue</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">result</span> <span class="o">&amp;&amp;</span> <span class="n">this</span><span class="o">.</span><span class="n">loadConsumeQueue</span><span class="p">();</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">result</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">this</span><span class="o">.</span><span class="n">storeCheckpoint</span> <span class="o">=</span>
+            <span class="nb">new</span> <span class="n">StoreCheckpoint</span><span class="p">(</span><span class="n">StorePathConfigHelper</span><span class="o">.</span><span class="n">getStoreCheckpoint</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">messageStoreConfig</span><span class="o">.</span><span class="n">getStorePathRootDir</span><span class="p">()));</span>
+            <span class="c">//加载 IndexFile</span>
+            <span class="n">this</span><span class="o">.</span><span class="n">indexService</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">lastExitOK</span><span class="p">);</span>
+
+            <span class="n">this</span><span class="o">.</span><span class="nb">recover</span><span class="p">(</span><span class="n">lastExitOK</span><span class="p">);</span>
+
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">"load over, and the max phy offset = {}"</span><span class="p">,</span> <span class="n">this</span><span class="o">.</span><span class="n">getMaxPhyOffset</span><span class="p">());</span>
+        <span class="p">}</span>
+    <span class="p">}</span> <span class="n">catch</span> <span class="p">(</span><span class="n">Exception</span> <span class="n">e</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">log</span><span class="o">.</span><span class="kt">error</span><span class="p">(</span><span class="s">"load exception"</span><span class="p">,</span> <span class="n">e</span><span class="p">);</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="no">false</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">result</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">allocateMappedFileService</span><span class="o">.</span><span class="n">shutdown</span><span class="p">();</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">result</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>commitlog加载，主要是mappedFileQueue负责管理的，一个mappedFileQueue持有多个MappedFile</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+</pre><td class="rouge-code"><pre><span class="c">//MappedFileQueue.load</span>
+<span class="n">public</span> <span class="n">boolean</span> <span class="n">load</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">boolean</span> <span class="n">result</span> <span class="o">=</span> <span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">load</span><span class="p">();</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">"load commit log "</span> <span class="o">+</span> <span class="p">(</span><span class="n">result</span> <span class="err">?</span> <span class="s">"OK"</span> <span class="o">:</span> <span class="s">"Failed"</span><span class="p">));</span>
+    <span class="k">return</span> <span class="n">result</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="c">//</span>
+<span class="n">public</span> <span class="n">boolean</span> <span class="n">load</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">File</span> <span class="n">dir</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">File</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">storePath</span><span class="p">);</span>
+    <span class="n">File</span><span class="p">[]</span> <span class="n">files</span> <span class="o">=</span> <span class="n">dir</span><span class="o">.</span><span class="n">listFiles</span><span class="p">();</span>
+    <span class="c">//遍历目录下所有的文件,生成MappedFile集合mappedFiles</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">files</span> <span class="o">!=</span> <span class="n">null</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c">// ascending order</span>
+        <span class="n">Arrays</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">files</span><span class="p">);</span>
+        <span class="k">for</span> <span class="p">(</span><span class="n">File</span> <span class="n">file</span> <span class="o">:</span> <span class="n">files</span><span class="p">)</span> <span class="p">{</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">length</span><span class="p">()</span> <span class="o">!=</span> <span class="n">this</span><span class="o">.</span><span class="n">mappedFileSize</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="n">file</span> <span class="o">+</span> <span class="s">"</span><span class="se">\t</span><span class="s">"</span> <span class="o">+</span> <span class="n">file</span><span class="o">.</span><span class="n">length</span><span class="p">()</span>
+                         <span class="o">+</span> <span class="s">" length not matched message store config value, please check it manually"</span><span class="p">);</span>
+                <span class="k">return</span> <span class="no">false</span><span class="p">;</span>
+            <span class="p">}</span>
+
+            <span class="n">try</span> <span class="p">{</span>
+        
+                <span class="n">MappedFile</span> <span class="n">mappedFile</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">MappedFile</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">getPath</span><span class="p">(),</span> <span class="n">mappedFileSize</span><span class="p">);</span>
+
+                <span class="n">mappedFile</span><span class="o">.</span><span class="n">setWrotePosition</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileSize</span><span class="p">);</span>
+                <span class="n">mappedFile</span><span class="o">.</span><span class="n">setFlushedPosition</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileSize</span><span class="p">);</span>
+                <span class="n">mappedFile</span><span class="o">.</span><span class="n">setCommittedPosition</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileSize</span><span class="p">);</span>
+                <span class="n">this</span><span class="o">.</span><span class="n">mappedFiles</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">mappedFile</span><span class="p">);</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">"load "</span> <span class="o">+</span> <span class="n">file</span><span class="o">.</span><span class="n">getPath</span><span class="p">()</span> <span class="o">+</span> <span class="s">" OK"</span><span class="p">);</span>
+            <span class="p">}</span> <span class="n">catch</span> <span class="p">(</span><span class="n">IOException</span> <span class="n">e</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">log</span><span class="o">.</span><span class="kt">error</span><span class="p">(</span><span class="s">"load file "</span> <span class="o">+</span> <span class="n">file</span> <span class="o">+</span> <span class="s">" error"</span><span class="p">,</span> <span class="n">e</span><span class="p">);</span>
+                <span class="k">return</span> <span class="no">false</span><span class="p">;</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="no">true</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>mappedFiles这个是一个CopyOnWriteArrayList</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+</pre><td class="rouge-code"><pre><span class="n">private</span> <span class="n">final</span> <span class="n">CopyOnWriteArrayList</span><span class="o">&lt;</span><span class="n">MappedFile</span><span class="o">&gt;</span> <span class="n">mappedFiles</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">CopyOnWriteArrayList</span><span class="o">&lt;</span><span class="n">MappedFile</span><span class="o">&gt;</span><span class="p">();</span>
+
+</pre></table></code></div></div><p>MappedFile 对应一个具体的文件</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+</pre><td class="rouge-code"><pre><span class="n">public</span> <span class="n">MappedFile</span><span class="p">(</span><span class="n">final</span> <span class="n">String</span> <span class="n">fileName</span><span class="p">,</span> <span class="n">final</span> <span class="kt">int</span> <span class="n">fileSize</span><span class="p">)</span> <span class="n">throws</span> <span class="n">IOException</span> <span class="p">{</span>
+    <span class="n">init</span><span class="p">(</span><span class="n">fileName</span><span class="p">,</span> <span class="n">fileSize</span><span class="p">);</span>
+<span class="p">}</span>
+<span class="n">public</span> <span class="n">void</span> <span class="n">init</span><span class="p">(</span><span class="n">final</span> <span class="n">String</span> <span class="n">fileName</span><span class="p">,</span> <span class="n">final</span> <span class="kt">int</span> <span class="n">fileSize</span><span class="p">,</span>
+                 <span class="n">final</span> <span class="n">TransientStorePool</span> <span class="n">transientStorePool</span><span class="p">)</span> <span class="n">throws</span> <span class="n">IOException</span> <span class="p">{</span>
+    <span class="n">init</span><span class="p">(</span><span class="n">fileName</span><span class="p">,</span> <span class="n">fileSize</span><span class="p">);</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">writeBuffer</span> <span class="o">=</span> <span class="n">transientStorePool</span><span class="o">.</span><span class="n">borrowBuffer</span><span class="p">();</span><span class="c">//堆外内存</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">transientStorePool</span> <span class="o">=</span> <span class="n">transientStorePool</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="c">//文件内存映射fileChannel.map</span>
+<span class="n">private</span> <span class="n">void</span> <span class="n">init</span><span class="p">(</span><span class="n">final</span> <span class="n">String</span> <span class="n">fileName</span><span class="p">,</span> <span class="n">final</span> <span class="kt">int</span> <span class="n">fileSize</span><span class="p">)</span> <span class="n">throws</span> <span class="n">IOException</span> <span class="p">{</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">fileName</span> <span class="o">=</span> <span class="n">fileName</span><span class="p">;</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">fileSize</span> <span class="o">=</span> <span class="n">fileSize</span><span class="p">;</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">file</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">File</span><span class="p">(</span><span class="n">fileName</span><span class="p">);</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">fileFromOffset</span> <span class="o">=</span> <span class="n">Long</span><span class="o">.</span><span class="n">parseLong</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">file</span><span class="o">.</span><span class="n">getName</span><span class="p">());</span>
+    <span class="n">boolean</span> <span class="n">ok</span> <span class="o">=</span> <span class="no">false</span><span class="p">;</span>
+
+    <span class="n">ensureDirOK</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">file</span><span class="o">.</span><span class="n">getParent</span><span class="p">());</span>
+
+    <span class="n">try</span> <span class="p">{</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">fileChannel</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">RandomAccessFile</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">file</span><span class="p">,</span> <span class="s">"rw"</span><span class="p">)</span><span class="o">.</span><span class="n">getChannel</span><span class="p">();</span>
+        <span class="c">//文件内存映射mappedByteBuffer</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">mappedByteBuffer</span> <span class="o">=</span> <span class="n">this</span><span class="o">.</span><span class="n">fileChannel</span><span class="o">.</span><span class="k">map</span><span class="p">(</span><span class="n">MapMode</span><span class="o">.</span><span class="n">READ_WRITE</span><span class="p">,</span> <span class="m">0</span><span class="p">,</span> <span class="n">fileSize</span><span class="p">);</span>
+        <span class="n">TOTAL_MAPPED_VIRTUAL_MEMORY</span><span class="o">.</span><span class="n">addAndGet</span><span class="p">(</span><span class="n">fileSize</span><span class="p">);</span>
+        <span class="n">TOTAL_MAPPED_FILES</span><span class="o">.</span><span class="n">incrementAndGet</span><span class="p">();</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="no">true</span><span class="p">;</span>
+    <span class="p">}</span> <span class="n">catch</span> <span class="p">(</span><span class="n">FileNotFoundException</span> <span class="n">e</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">log</span><span class="o">.</span><span class="kt">error</span><span class="p">(</span><span class="s">"Failed to create file "</span> <span class="o">+</span> <span class="n">this</span><span class="o">.</span><span class="n">fileName</span><span class="p">,</span> <span class="n">e</span><span class="p">);</span>
+        <span class="n">throw</span> <span class="n">e</span><span class="p">;</span>
+    <span class="p">}</span> <span class="n">catch</span> <span class="p">(</span><span class="n">IOException</span> <span class="n">e</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">log</span><span class="o">.</span><span class="kt">error</span><span class="p">(</span><span class="s">"Failed to map file "</span> <span class="o">+</span> <span class="n">this</span><span class="o">.</span><span class="n">fileName</span><span class="p">,</span> <span class="n">e</span><span class="p">);</span>
+        <span class="n">throw</span> <span class="n">e</span><span class="p">;</span>
+    <span class="p">}</span> <span class="n">finally</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">ok</span> <span class="o">&amp;&amp;</span> <span class="n">this</span><span class="o">.</span><span class="n">fileChannel</span> <span class="o">!=</span> <span class="n">null</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">this</span><span class="o">.</span><span class="n">fileChannel</span><span class="o">.</span><span class="nb">close</span><span class="p">();</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>broker端put大致流程</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+</pre><td class="rouge-code"><pre><span class="n">SendMessageProcessor</span><span class="o">.</span><span class="n">processRequest</span>
+<span class="n">SendMessageProcessor</span><span class="o">.</span><span class="n">asyncProcessRequest</span>
+<span class="n">SendMessageProcessor</span><span class="o">.</span><span class="n">asyncSendBatchMessage</span><span class="o">/</span><span class="n">asyncSendMessage</span>
+<span class="n">DefaultMessageStore</span><span class="o">.</span><span class="n">asyncPutMessage</span>
+<span class="n">CommitLog</span><span class="o">.</span><span class="n">asyncPutMessage</span>
+
+</pre></table></code></div></div><p>CommitLog 的asyncPutMessage</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+</pre><td class="rouge-code"><pre><span class="n">public</span> <span class="n">CompletableFuture</span><span class="o">&lt;</span><span class="n">PutMessageResult</span><span class="o">&gt;</span> <span class="n">asyncPutMessage</span><span class="p">(</span><span class="n">final</span> <span class="n">MessageExtBrokerInner</span> <span class="n">msg</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c">//从mappedFileQueue获取最新的一个MappedFile</span>
+    <span class="n">MappedFile</span> <span class="n">mappedFile</span> <span class="o">=</span> <span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">getLastMappedFile</span><span class="p">();</span>
+    <span class="c">//如果没有获取到或者文件满了,则重新创建一个</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">null</span> <span class="o">==</span> <span class="n">mappedFile</span> <span class="o">||</span> <span class="n">mappedFile</span><span class="o">.</span><span class="n">isFull</span><span class="p">())</span> <span class="p">{</span>
+        <span class="n">mappedFile</span> <span class="o">=</span> <span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">getLastMappedFile</span><span class="p">(</span><span class="m">0</span><span class="p">);</span> <span class="c">// Mark: NewFile may be cause noise</span>
+    <span class="p">}</span>
+    <span class="c">//追加到最新的MappedFile</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">mappedFile</span><span class="o">.</span><span class="n">appendMessage</span><span class="p">(</span><span class="n">msg</span><span class="p">,</span> <span class="n">this</span><span class="o">.</span><span class="n">appendMessageCallback</span><span class="p">);</span>
+    <span class="c">//提交刷盘请求</span>
+    <span class="n">CompletableFuture</span><span class="o">&lt;</span><span class="n">PutMessageStatus</span><span class="o">&gt;</span> <span class="n">flushResultFuture</span> <span class="o">=</span> <span class="n">submitFlushRequest</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">putMessageResult</span><span class="p">,</span> <span class="n">msg</span><span class="p">);</span>
+    <span class="c">//</span>
+    <span class="n">CompletableFuture</span><span class="o">&lt;</span><span class="n">PutMessageStatus</span><span class="o">&gt;</span> <span class="n">replicaResultFuture</span> <span class="o">=</span> <span class="n">submitReplicaRequest</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">putMessageResult</span><span class="p">,</span> <span class="n">msg</span><span class="p">);</span>
+
+<span class="p">}</span>
+
+</pre></table></code></div></div><p>MappedFile<br />填充最新的message,这里并没有强制刷盘<br />获取byteBuffer，两种类型writeBuffer、mappedByteBuffer用来</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+</pre><td class="rouge-code"><pre><span class="n">public</span> <span class="n">AppendMessageResult</span> <span class="n">appendMessagesInner</span><span class="p">(</span><span class="n">final</span> <span class="n">MessageExt</span> <span class="n">messageExt</span><span class="p">,</span> <span class="n">final</span> <span class="n">AppendMessageCallback</span> <span class="n">cb</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">assert</span> <span class="n">messageExt</span> <span class="o">!=</span> <span class="n">null</span><span class="p">;</span>
+    <span class="n">assert</span> <span class="n">cb</span> <span class="o">!=</span> <span class="n">null</span><span class="p">;</span>
+
+    <span class="kt">int</span> <span class="n">currentPos</span> <span class="o">=</span> <span class="n">this</span><span class="o">.</span><span class="n">wrotePosition</span><span class="o">.</span><span class="n">get</span><span class="p">();</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">currentPos</span> <span class="o">&lt;</span> <span class="n">this</span><span class="o">.</span><span class="n">fileSize</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">ByteBuffer</span> <span class="n">byteBuffer</span> <span class="o">=</span> <span class="n">writeBuffer</span> <span class="o">!=</span> <span class="n">null</span> <span class="err">?</span> <span class="n">writeBuffer</span><span class="o">.</span><span class="n">slice</span><span class="p">()</span> <span class="o">:</span> <span class="n">this</span><span class="o">.</span><span class="n">mappedByteBuffer</span><span class="o">.</span><span class="n">slice</span><span class="p">();</span><span class="c">//堆外内存或者文件内存映射</span>
+        <span class="n">byteBuffer</span><span class="o">.</span><span class="n">position</span><span class="p">(</span><span class="n">currentPos</span><span class="p">);</span>
+        <span class="n">AppendMessageResult</span> <span class="n">result</span><span class="p">;</span>
+        <span class="c">//doAppend只是用messageExt填充byteBuffer，没有强制刷盘,还在内存中</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">messageExt</span> <span class="n">instanceof</span> <span class="n">MessageExtBrokerInner</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">cb</span><span class="o">.</span><span class="n">doAppend</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">getFileFromOffset</span><span class="p">(),</span> <span class="n">byteBuffer</span><span class="p">,</span> <span class="n">this</span><span class="o">.</span><span class="n">fileSize</span> <span class="o">-</span> <span class="n">currentPos</span><span class="p">,</span> <span class="p">(</span><span class="n">MessageExtBrokerInner</span><span class="p">)</span> <span class="n">messageExt</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">messageExt</span> <span class="n">instanceof</span> <span class="n">MessageExtBatch</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">cb</span><span class="o">.</span><span class="n">doAppend</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">getFileFromOffset</span><span class="p">(),</span> <span class="n">byteBuffer</span><span class="p">,</span> <span class="n">this</span><span class="o">.</span><span class="n">fileSize</span> <span class="o">-</span> <span class="n">currentPos</span><span class="p">,</span> <span class="p">(</span><span class="n">MessageExtBatch</span><span class="p">)</span> <span class="n">messageExt</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="nb">new</span> <span class="n">AppendMessageResult</span><span class="p">(</span><span class="n">AppendMessageStatus</span><span class="o">.</span><span class="n">UNKNOWN_ERROR</span><span class="p">);</span>
+        <span class="p">}</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">wrotePosition</span><span class="o">.</span><span class="n">addAndGet</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">getWroteBytes</span><span class="p">());</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">storeTimestamp</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">getStoreTimestamp</span><span class="p">();</span>
+        <span class="k">return</span> <span class="n">result</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="n">log</span><span class="o">.</span><span class="kt">error</span><span class="p">(</span><span class="s">"MappedFile.appendMessage return null, wrotePosition: {} fileSize: {}"</span><span class="p">,</span> <span class="n">currentPos</span><span class="p">,</span> <span class="n">this</span><span class="o">.</span><span class="n">fileSize</span><span class="p">);</span>
+    <span class="k">return</span> <span class="nb">new</span> <span class="n">AppendMessageResult</span><span class="p">(</span><span class="n">AppendMessageStatus</span><span class="o">.</span><span class="n">UNKNOWN_ERROR</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>堆外内存ByteBuffer：</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+</pre><td class="rouge-code"><pre> <span class="n">this</span><span class="o">.</span><span class="n">writeBuffer</span> <span class="o">=</span> <span class="n">transientStorePool</span><span class="o">.</span><span class="n">borrowBuffer</span><span class="p">();</span><span class="c">//堆外内存</span>
+
+</pre></table></code></div></div><p>物理文件对应的内存映射Buffer</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+</pre><td class="rouge-code"><pre> <span class="n">this</span><span class="o">.</span><span class="n">fileChannel</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">RandomAccessFile</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">file</span><span class="p">,</span> <span class="s">"rw"</span><span class="p">)</span><span class="o">.</span><span class="n">getChannel</span><span class="p">();</span>
+        <span class="c">//文件内存映射mappedByteBuffer</span>
+ <span class="n">this</span><span class="o">.</span><span class="n">mappedByteBuffer</span> <span class="o">=</span> <span class="n">this</span><span class="o">.</span><span class="n">fileChannel</span><span class="o">.</span><span class="k">map</span><span class="p">(</span><span class="n">MapMode</span><span class="o">.</span><span class="n">READ_WRITE</span><span class="p">,</span> <span class="m">0</span><span class="p">,</span> <span class="n">fileSize</span><span class="p">);</span>
+</pre></table></code></div></div><p>那么到底何时刷盘呢，有两种方式同步或者异步</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+</pre><td class="rouge-code"><pre><span class="n">public</span> <span class="n">enum</span> <span class="n">FlushDiskType</span> <span class="p">{</span>
+    <span class="n">SYNC_FLUSH</span><span class="p">,</span>
+    <span class="n">ASYNC_FLUSH</span>
+<span class="p">}</span>
+<span class="k">if</span> <span class="p">(</span><span class="n">FlushDiskType</span><span class="o">.</span><span class="n">SYNC_FLUSH</span> <span class="o">==</span> <span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getFlushDiskType</span><span class="p">())</span> <span class="p">{</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">flushCommitLogService</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">GroupCommitService</span><span class="p">();</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">flushCommitLogService</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">FlushRealTimeService</span><span class="p">();</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>如果是同步刷盘Commitlog将消息appendMessage到MappedFile后会调用submitFlushRequest</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+</pre><td class="rouge-code"><pre><span class="n">public</span> <span class="n">CompletableFuture</span><span class="o">&lt;</span><span class="n">PutMessageStatus</span><span class="o">&gt;</span> <span class="n">submitFlushRequest</span><span class="p">(</span><span class="n">AppendMessageResult</span> <span class="n">result</span><span class="p">,</span> <span class="n">PutMessageResult</span> <span class="n">putMessageResult</span><span class="p">,</span>
+                                                              <span class="n">MessageExt</span> <span class="n">messageExt</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c">// Synchronization flush 同步模式直接交给GroupCommitService</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">FlushDiskType</span><span class="o">.</span><span class="n">SYNC_FLUSH</span> <span class="o">==</span> <span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getFlushDiskType</span><span class="p">())</span> <span class="p">{</span>
+        <span class="n">final</span> <span class="n">GroupCommitService</span> <span class="n">service</span> <span class="o">=</span> <span class="p">(</span><span class="n">GroupCommitService</span><span class="p">)</span> <span class="n">this</span><span class="o">.</span><span class="n">flushCommitLogService</span><span class="p">;</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">messageExt</span><span class="o">.</span><span class="n">isWaitStoreMsgOK</span><span class="p">())</span> <span class="p">{</span>
+            <span class="n">GroupCommitRequest</span> <span class="n">request</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">GroupCommitRequest</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">getWroteOffset</span><span class="p">()</span> <span class="o">+</span> <span class="n">result</span><span class="o">.</span><span class="n">getWroteBytes</span><span class="p">(),</span>
+                                                                <span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getSyncFlushTimeout</span><span class="p">());</span>
+            <span class="n">service</span><span class="o">.</span><span class="n">putRequest</span><span class="p">(</span><span class="n">request</span><span class="p">);</span>
+            <span class="k">return</span> <span class="n">request</span><span class="o">.</span><span class="n">future</span><span class="p">();</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="n">service</span><span class="o">.</span><span class="n">wakeup</span><span class="p">();</span>
+            <span class="k">return</span> <span class="n">CompletableFuture</span><span class="o">.</span><span class="n">completedFuture</span><span class="p">(</span><span class="n">PutMessageStatus</span><span class="o">.</span><span class="n">PUT_OK</span><span class="p">);</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="c">// Asynchronous flush</span>
+    <span class="k">else</span> <span class="p">{</span>
+        <span class="c">//异步刷盘策略唤醒commitLogService,具体实现FlushRealTimeService</span>
+        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">isTransientStorePoolEnable</span><span class="p">())</span> <span class="p">{</span>
+            <span class="n">flushCommitLogService</span><span class="o">.</span><span class="n">wakeup</span><span class="p">();</span>
+        <span class="p">}</span> <span class="k">else</span>  <span class="p">{</span>
+            <span class="n">commitLogService</span><span class="o">.</span><span class="n">wakeup</span><span class="p">();</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="n">CompletableFuture</span><span class="o">.</span><span class="n">completedFuture</span><span class="p">(</span><span class="n">PutMessageStatus</span><span class="o">.</span><span class="n">PUT_OK</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>GroupCommitService先放到队列</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+</pre><td class="rouge-code"><pre><span class="c">//GroupTransferService</span>
+<span class="n">public</span> <span class="n">synchronized</span> <span class="n">void</span> <span class="n">putRequest</span><span class="p">(</span><span class="n">final</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">GroupCommitRequest</span> <span class="n">request</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">synchronized</span> <span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">requestsWrite</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">requestsWrite</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">request</span><span class="p">);</span><span class="c">//放入队列requestsWrite</span>
+    <span class="p">}</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">wakeup</span><span class="p">();</span>
+<span class="p">}</span>
+<span class="c">//唤醒消费</span>
+<span class="n">public</span> <span class="n">void</span> <span class="n">wakeup</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">hasNotified</span><span class="o">.</span><span class="n">compareAndSet</span><span class="p">(</span><span class="no">false</span><span class="p">,</span> <span class="no">true</span><span class="p">))</span> <span class="p">{</span>
+        <span class="n">waitPoint</span><span class="o">.</span><span class="n">countDown</span><span class="p">();</span> <span class="c">// notify</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>消费在run 方法</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+</pre><td class="rouge-code"><pre><span class="n">public</span> <span class="n">void</span> <span class="n">run</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">CommitLog</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">getServiceName</span><span class="p">()</span> <span class="o">+</span> <span class="s">" service started"</span><span class="p">);</span>
+
+    <span class="n">while</span> <span class="p">(</span><span class="o">!</span><span class="n">this</span><span class="o">.</span><span class="n">isStopped</span><span class="p">())</span> <span class="p">{</span>
+        <span class="n">try</span> <span class="p">{</span>
+            <span class="n">this</span><span class="o">.</span><span class="n">waitForRunning</span><span class="p">(</span><span class="m">10</span><span class="p">);</span><span class="c">//swapRequests交换数据requestsWrite--&gt;requestsRead</span>
+            <span class="n">this</span><span class="o">.</span><span class="n">doCommit</span><span class="p">();</span><span class="c">//读取requestsRead的数据执行flush操作</span>
+        <span class="p">}</span> <span class="n">catch</span> <span class="p">(</span><span class="n">Exception</span> <span class="n">e</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">CommitLog</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">getServiceName</span><span class="p">()</span> <span class="o">+</span> <span class="s">" service has exception. "</span><span class="p">,</span> <span class="n">e</span><span class="p">);</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="c">// Under normal circumstances shutdown, wait for the arrival of the</span>
+    <span class="c">// request, and then flush</span>
+    <span class="n">try</span> <span class="p">{</span>
+        <span class="n">Thread</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="m">10</span><span class="p">);</span>
+    <span class="p">}</span> <span class="n">catch</span> <span class="p">(</span><span class="n">InterruptedException</span> <span class="n">e</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">CommitLog</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s">"GroupCommitService Exception, "</span><span class="p">,</span> <span class="n">e</span><span class="p">);</span>
+    <span class="p">}</span>
+
+    <span class="n">synchronized</span> <span class="p">(</span><span class="n">this</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">swapRequests</span><span class="p">();</span>
+    <span class="p">}</span>
+
+    <span class="n">this</span><span class="o">.</span><span class="n">doCommit</span><span class="p">();</span>
+
+    <span class="n">CommitLog</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">getServiceName</span><span class="p">()</span> <span class="o">+</span> <span class="s">" service end"</span><span class="p">);</span>
+<span class="p">}</span>       
+<span class="c">//requestsWrite给requestsRead</span>
+<span class="n">private</span> <span class="n">void</span> <span class="n">swapRequests</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">List</span><span class="o">&lt;</span><span class="n">GroupCommitRequest</span><span class="o">&gt;</span> <span class="n">tmp</span> <span class="o">=</span> <span class="n">this</span><span class="o">.</span><span class="n">requestsWrite</span><span class="p">;</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">requestsWrite</span> <span class="o">=</span> <span class="n">this</span><span class="o">.</span><span class="n">requestsRead</span><span class="p">;</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">requestsRead</span> <span class="o">=</span> <span class="n">tmp</span><span class="p">;</span>
+<span class="p">}</span>
+
+
+</pre></table></code></div></div><p>doCommit主要读取requestsRead数据,最终调用CommitLog.this.mappedFileQueue.flush(0) 来进行刷盘</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+</pre><td class="rouge-code"><pre><span class="n">private</span> <span class="n">void</span> <span class="n">doCommit</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">synchronized</span> <span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">requestsRead</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">this</span><span class="o">.</span><span class="n">requestsRead</span><span class="o">.</span><span class="n">isEmpty</span><span class="p">())</span> <span class="p">{</span>
+            <span class="k">for</span> <span class="p">(</span><span class="n">GroupCommitRequest</span> <span class="n">req</span> <span class="o">:</span> <span class="n">this</span><span class="o">.</span><span class="n">requestsRead</span><span class="p">)</span> <span class="p">{</span>
+                <span class="c">// There may be a message in the next file, so a maximum of</span>
+                <span class="c">// two times the flush</span>
+                <span class="n">boolean</span> <span class="n">flushOK</span> <span class="o">=</span> <span class="no">false</span><span class="p">;</span>
+                <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="m">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="m">2</span> <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="n">flushOK</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+                    <span class="n">flushOK</span> <span class="o">=</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">getFlushedWhere</span><span class="p">()</span> <span class="o">&gt;=</span> <span class="n">req</span><span class="o">.</span><span class="n">getNextOffset</span><span class="p">();</span>
+                    <span class="c">//</span>
+                    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">flushOK</span><span class="p">)</span> <span class="p">{</span>
+                        <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">flush</span><span class="p">(</span><span class="m">0</span><span class="p">);</span><span class="c">//消息同步flush</span>
+                    <span class="p">}</span>
+                <span class="p">}</span>
+
+                <span class="n">req</span><span class="o">.</span><span class="n">wakeupCustomer</span><span class="p">(</span><span class="n">flushOK</span> <span class="err">?</span> <span class="n">PutMessageStatus</span><span class="o">.</span><span class="n">PUT_OK</span> <span class="o">:</span> <span class="n">PutMessageStatus</span><span class="o">.</span><span class="n">FLUSH_DISK_TIMEOUT</span><span class="p">);</span>
+            <span class="p">}</span>
+
+            <span class="n">long</span> <span class="n">storeTimestamp</span> <span class="o">=</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">getStoreTimestamp</span><span class="p">();</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">storeTimestamp</span> <span class="o">&gt;</span> <span class="m">0</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getStoreCheckpoint</span><span class="p">()</span><span class="o">.</span><span class="n">setPhysicMsgTimestamp</span><span class="p">(</span><span class="n">storeTimestamp</span><span class="p">);</span>
+            <span class="p">}</span>
+
+            <span class="n">this</span><span class="o">.</span><span class="n">requestsRead</span><span class="o">.</span><span class="n">clear</span><span class="p">();</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="c">// Because of individual messages is set to not sync flush, it</span>
+            <span class="c">// will come to this process</span>
+            <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">flush</span><span class="p">(</span><span class="m">0</span><span class="p">);</span><span class="c">//消息同步</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>异步刷盘 分两种情况<br />正常情况下使用：FlushRealTimeService<br />如果开启内存缓冲池transientStorePool则会使用CommitRealTimeService</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+</pre><td class="rouge-code"><pre><span class="k">if</span> <span class="p">(</span><span class="n">FlushDiskType</span><span class="o">.</span><span class="n">SYNC_FLUSH</span> <span class="o">==</span> <span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getFlushDiskType</span><span class="p">())</span> <span class="p">{</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">flushCommitLogService</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">GroupCommitService</span><span class="p">();</span> <span class="c">//mmap模式同步</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+    <span class="n">this</span><span class="o">.</span><span class="n">flushCommitLogService</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">FlushRealTimeService</span><span class="p">();</span><span class="c">//mmap模式异步</span>
+<span class="p">}</span>
+
+<span class="n">this</span><span class="o">.</span><span class="n">commitLogService</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">CommitRealTimeService</span><span class="p">();</span><span class="c">//内存缓冲池时间使用</span>
+</pre></table></code></div></div><p>如果开启，在获取最新的MappedFile文件的时候,通过来AllocateMappedFileService异步创建,<br />AllocateMappedFileService继承自ServiceThread，其run方法会调用mmapOperation,在mmapOperation中创建mappedFile</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+</pre><td class="rouge-code"><pre><span class="c">//AllocateMappedFileService.mmapOperation</span>
+<span class="k">if</span> <span class="p">(</span><span class="n">messageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">isTransientStorePoolEnable</span><span class="p">())</span> <span class="p">{</span><span class="c">//开启内存缓冲池</span>
+    <span class="c">//缓冲池</span>
+    <span class="n">try</span> <span class="p">{</span>
+        <span class="n">mappedFile</span> <span class="o">=</span> <span class="n">ServiceLoader</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">MappedFile</span><span class="o">.</span><span class="n">class</span><span class="p">)</span><span class="o">.</span><span class="n">iterator</span><span class="p">()</span><span class="o">.</span><span class="n">next</span><span class="p">();</span>
+        <span class="n">mappedFile</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">req</span><span class="o">.</span><span class="n">getFilePath</span><span class="p">(),</span> <span class="n">req</span><span class="o">.</span><span class="n">getFileSize</span><span class="p">(),</span> <span class="n">messageStore</span><span class="o">.</span><span class="n">getTransientStorePool</span><span class="p">());</span>
+    <span class="p">}</span> <span class="n">catch</span> <span class="p">(</span><span class="n">RuntimeException</span> <span class="n">e</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s">"Use default implementation."</span><span class="p">);</span>
+        <span class="n">mappedFile</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">MappedFile</span><span class="p">(</span><span class="n">req</span><span class="o">.</span><span class="n">getFilePath</span><span class="p">(),</span> <span class="n">req</span><span class="o">.</span><span class="n">getFileSize</span><span class="p">(),</span> <span class="n">messageStore</span><span class="o">.</span><span class="n">getTransientStorePool</span><span class="p">());</span><span class="c">//</span>
+    <span class="p">}</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+    <span class="n">mappedFile</span> <span class="o">=</span> <span class="nb">new</span> <span class="n">MappedFile</span><span class="p">(</span><span class="n">req</span><span class="o">.</span><span class="n">getFilePath</span><span class="p">(),</span> <span class="n">req</span><span class="o">.</span><span class="n">getFileSize</span><span class="p">());</span><span class="c">//mmap方式</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>常规异步刷盘FlushRealTimeService<br />在run方法周期性的进行刷盘操作，主要逻辑：</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+</pre><td class="rouge-code"><pre><span class="n">while</span> <span class="p">(</span><span class="o">!</span><span class="n">this</span><span class="o">.</span><span class="n">isStopped</span><span class="p">())</span> <span class="p">{</span>
+    <span class="c">//休眠策略 使用Thread.sleep 还是CountDownLatch2.await</span>
+    <span class="n">boolean</span> <span class="n">flushCommitLogTimed</span> <span class="o">=</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">isFlushCommitLogTimed</span><span class="p">();</span>
+    <span class="c">//刷盘周期,默认: 500ms</span>
+    <span class="kt">int</span> <span class="n">interval</span> <span class="o">=</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getFlushIntervalCommitLog</span><span class="p">();</span>
+    <span class="c">//每次刷盘至少要刷多少页内容，默认每次要刷4页，每页大小为4k</span>
+    <span class="kt">int</span> <span class="n">flushPhysicQueueLeastPages</span> <span class="o">=</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getFlushCommitLogLeastPages</span><span class="p">();</span>
+    <span class="c">//最大时间间隔10s</span>
+    <span class="kt">int</span> <span class="n">flushPhysicQueueThoroughInterval</span> <span class="o">=</span>
+    <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getFlushCommitLogThoroughInterval</span><span class="p">();</span>
+
+    <span class="n">boolean</span> <span class="n">printFlushProgress</span> <span class="o">=</span> <span class="no">false</span><span class="p">;</span>
+
+    <span class="c">// Print flush progress</span>
+    <span class="n">long</span> <span class="n">currentTimeMillis</span> <span class="o">=</span> <span class="n">System</span><span class="o">.</span><span class="n">currentTimeMillis</span><span class="p">();</span>
+    <span class="c">//当前距离上次刷盘时间间隔</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">currentTimeMillis</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">lastFlushTimestamp</span> <span class="o">+</span> <span class="n">flushPhysicQueueThoroughInterval</span><span class="p">))</span> <span class="p">{</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">lastFlushTimestamp</span> <span class="o">=</span> <span class="n">currentTimeMillis</span><span class="p">;</span>
+        <span class="n">flushPhysicQueueLeastPages</span> <span class="o">=</span> <span class="m">0</span><span class="p">;</span><span class="c">//超时全部需要flush了</span>
+        <span class="n">printFlushProgress</span> <span class="o">=</span> <span class="p">(</span><span class="n">printTimes</span><span class="o">++</span> <span class="o">%</span> <span class="m">10</span><span class="p">)</span> <span class="o">==</span> <span class="m">0</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">try</span> <span class="p">{</span>
+        <span class="c">//休眠策略</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">flushCommitLogTimed</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">Thread</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">interval</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="n">this</span><span class="o">.</span><span class="n">waitForRunning</span><span class="p">(</span><span class="n">interval</span><span class="p">);</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">printFlushProgress</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">this</span><span class="o">.</span><span class="n">printFlushProgress</span><span class="p">();</span>
+        <span class="p">}</span>
+
+        <span class="n">long</span> <span class="n">begin</span> <span class="o">=</span> <span class="n">System</span><span class="o">.</span><span class="n">currentTimeMillis</span><span class="p">();</span>
+        <span class="c">//执行刷盘操作</span>
+        <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">flush</span><span class="p">(</span><span class="n">flushPhysicQueueLeastPages</span><span class="p">);</span>
+        <span class="n">long</span> <span class="n">storeTimestamp</span> <span class="o">=</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">getStoreTimestamp</span><span class="p">();</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">storeTimestamp</span> <span class="o">&gt;</span> <span class="m">0</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getStoreCheckpoint</span><span class="p">()</span><span class="o">.</span><span class="n">setPhysicMsgTimestamp</span><span class="p">(</span><span class="n">storeTimestamp</span><span class="p">);</span>
+        <span class="p">}</span>
+        <span class="n">long</span> <span class="n">past</span> <span class="o">=</span> <span class="n">System</span><span class="o">.</span><span class="n">currentTimeMillis</span><span class="p">()</span> <span class="o">-</span> <span class="n">begin</span><span class="p">;</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">past</span> <span class="o">&gt;</span> <span class="m">500</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">"Flush data to disk costs {} ms"</span><span class="p">,</span> <span class="n">past</span><span class="p">);</span>
+        <span class="p">}</span>
+    <span class="p">}</span> <span class="n">catch</span> <span class="p">(</span><span class="n">Throwable</span> <span class="n">e</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">CommitLog</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">getServiceName</span><span class="p">()</span> <span class="o">+</span> <span class="s">" service has exception. "</span><span class="p">,</span> <span class="n">e</span><span class="p">);</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">printFlushProgress</span><span class="p">();</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></table></code></div></div><p>CommitRealTimeService<br />调用方法MappedFileQueue#commit执行数据提交到磁盘工作,commit没有执行force操作强制刷盘<br />一旦有数据被commit，就会唤醒flushCommitLogService执行刷盘操作</p><div class="language-go highlighter-rouge"><div class="code-header"> <span data-label-text="Go"><i class="fas fa-code small"></i></span> <button aria-label="copy" data-title-succeed="Copied!"><i class="far fa-clipboard"></i></button></div><div class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+</pre><td class="rouge-code"><pre><span class="n">while</span> <span class="p">(</span><span class="o">!</span><span class="n">this</span><span class="o">.</span><span class="n">isStopped</span><span class="p">())</span> <span class="p">{</span>
+    <span class="c">//提交到FileChannel的时间间隔，在TransientStorePool打开的情况下使用，默认200ms</span>
+    <span class="kt">int</span> <span class="n">interval</span> <span class="o">=</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getCommitIntervalCommitLog</span><span class="p">();</span>
+    <span class="c">//每次提交至少多少个page(默认是4个)</span>
+    <span class="kt">int</span> <span class="n">commitDataLeastPages</span> <span class="o">=</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getCommitCommitLogLeastPages</span><span class="p">();</span>
+    <span class="c">//提交完成间隔时间</span>
+    <span class="kt">int</span> <span class="n">commitDataThoroughInterval</span> <span class="o">=</span>
+    <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">defaultMessageStore</span><span class="o">.</span><span class="n">getMessageStoreConfig</span><span class="p">()</span><span class="o">.</span><span class="n">getCommitCommitLogThoroughInterval</span><span class="p">();</span>
+
+    <span class="n">long</span> <span class="n">begin</span> <span class="o">=</span> <span class="n">System</span><span class="o">.</span><span class="n">currentTimeMillis</span><span class="p">();</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">begin</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">lastCommitTimestamp</span> <span class="o">+</span> <span class="n">commitDataThoroughInterval</span><span class="p">))</span> <span class="p">{</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">lastCommitTimestamp</span> <span class="o">=</span> <span class="n">begin</span><span class="p">;</span>
+        <span class="n">commitDataLeastPages</span> <span class="o">=</span> <span class="m">0</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">try</span> <span class="p">{</span>
+        <span class="c">//有数据commited返回false</span>
+        <span class="n">boolean</span> <span class="n">result</span> <span class="o">=</span> <span class="n">CommitLog</span><span class="o">.</span><span class="n">this</span><span class="o">.</span><span class="n">mappedFileQueue</span><span class="o">.</span><span class="n">commit</span><span class="p">(</span><span class="n">commitDataLeastPages</span><span class="p">);</span>
+        <span class="n">long</span> <span class="n">end</span> <span class="o">=</span> <span class="n">System</span><span class="o">.</span><span class="n">currentTimeMillis</span><span class="p">();</span>
+        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">result</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">this</span><span class="o">.</span><span class="n">lastCommitTimestamp</span> <span class="o">=</span> <span class="n">end</span><span class="p">;</span> <span class="c">// result = false means some data committed.</span>
+            <span class="c">//now wake up flush thread.</span>
+            <span class="n">flushCommitLogService</span><span class="o">.</span><span class="n">wakeup</span><span class="p">();</span><span class="c">//唤醒flushCommitLogService执行刷盘</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">begin</span> <span class="o">&gt;</span> <span class="m">500</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">"Commit data to file costs {} ms"</span><span class="p">,</span> <span class="n">end</span> <span class="o">-</span> <span class="n">begin</span><span class="p">);</span>
+        <span class="p">}</span>
+        <span class="n">this</span><span class="o">.</span><span class="n">waitForRunning</span><span class="p">(</span><span class="n">interval</span><span class="p">);</span>
+    <span class="p">}</span> <span class="n">catch</span> <span class="p">(</span><span class="n">Throwable</span> <span class="n">e</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">CommitLog</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="kt">error</span><span class="p">(</span><span class="n">this</span><span class="o">.</span><span class="n">getServiceName</span><span class="p">()</span> <span class="o">+</span> <span class="s">" service has exception. "</span><span class="p">,</span> <span class="n">e</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></table></code></div></div></div><div class="post-tail-wrapper text-muted"><div class="post-meta mb-3"> <i class="far fa-folder-open fa-fw mr-1"></i> <a href='/categories/rocketmq/'>rocketmq</a></div><div class="post-tags"> <i class="fa fa-tags fa-fw mr-1"></i> <a href="/tags/rocketmq/" class="post-tag no-text-decoration" >rocketmq</a></div><div class="post-tail-bottom d-flex justify-content-between align-items-center mt-3 pt-5 pb-2"><div class="license-wrapper"> This post is licensed under <a href="https://creativecommons.org/licenses/by/4.0/"> CC BY 4.0 </a> by the author.</div><div class="share-wrapper"> <span class="share-label text-muted mr-1">Share</span> <span class="share-icons"> <a href="https://twitter.com/intent/tweet?text=RocketMQ+%E6%B6%88%E6%81%AF%E5%AD%98%E5%82%A8+-+2pc&url=%2Fposts%2FRockerMQ%25E6%25B6%2588%25E6%2581%25AF%25E5%25AD%2598%25E5%2582%25A8%2F" data-toggle="tooltip" data-placement="top" title="Twitter" target="_blank" rel="noopener" aria-label="Twitter"> <i class="fa-fw fab fa-twitter"></i> </a> <a href="https://www.facebook.com/sharer/sharer.php?title=RocketMQ+%E6%B6%88%E6%81%AF%E5%AD%98%E5%82%A8+-+2pc&u=%2Fposts%2FRockerMQ%25E6%25B6%2588%25E6%2581%25AF%25E5%25AD%2598%25E5%2582%25A8%2F" data-toggle="tooltip" data-placement="top" title="Facebook" target="_blank" rel="noopener" aria-label="Facebook"> <i class="fa-fw fab fa-facebook-square"></i> </a> <a href="https://t.me/share/url?url=%2Fposts%2FRockerMQ%25E6%25B6%2588%25E6%2581%25AF%25E5%25AD%2598%25E5%2582%25A8%2F&text=RocketMQ+%E6%B6%88%E6%81%AF%E5%AD%98%E5%82%A8+-+2pc" data-toggle="tooltip" data-placement="top" title="Telegram" target="_blank" rel="noopener" aria-label="Telegram"> <i class="fa-fw fab fa-telegram"></i> </a> <i id="copy-link" class="fa-fw fas fa-link small" data-toggle="tooltip" data-placement="top" title="Copy link" data-title-succeed="Link copied successfully!"> </i> </span></div></div></div></div></div><div id="panel-wrapper" class="col-xl-3 pl-2 text-muted"><div class="access"><div id="access-lastmod" class="post"><div class="panel-heading">Recently Updated</div><ul class="post-content pl-0 pb-1 ml-1 mt-2"><li><a href="/posts/dubbo_threadpool/">Dubbo线程池问题汇总</a><li><a href="/posts/rocketMQ_max_maxReconsumeTimes/">RocketMQ 最大消费次数maxReconsumeTimes</a><li><a href="/posts/CF_forkjoin/">CompletableFuture与ForkJoinPool</a><li><a href="/posts/Elasticsearch-notes/">Elasticsearch笔记</a><li><a href="/posts/Solr5/">Solr5.x &&SolrCloud</a></ul></div><div id="access-tags"><div class="panel-heading">Trending Tags</div><div class="d-flex flex-wrap mt-3 mb-1 mr-3"> <a class="post-tag" href="/tags/realtime/">realtime</a> <a class="post-tag" href="/tags/flink/">flink</a> <a class="post-tag" href="/tags/distributed/">distributed</a> <a class="post-tag" href="/tags/java/">Java</a> <a class="post-tag" href="/tags/datascience/">Datascience</a> <a class="post-tag" href="/tags/ml/">ML</a> <a class="post-tag" href="/tags/python/">python</a> <a class="post-tag" href="/tags/streamsets/">streamsets</a> <a class="post-tag" href="/tags/search/">Search</a> <a class="post-tag" href="/tags/file/">File</a></div></div></div></div></div><div class="row"><div id="tail-wrapper" class="col-12 col-lg-11 col-xl-9 pl-3 pr-3 pr-xl-4"><div id="related-posts" class="mt-5 mb-2 mb-sm-4"><h3 class="pt-2 mt-1 mb-4 ml-1" data-toc-skip>Further Reading</h3><div class="card-deck mb-4"><div class="card"> <a href="/posts/rocketMQ_max_maxReconsumeTimes/"><div class="card-body"> <em class="small" data-ts="1640822400" data-df="ll" > Dec 30, 2021 </em><h3 class="pt-0 mt-1 mb-3" data-toc-skip>RocketMQ 最大消费次数maxReconsumeTimes</h3><div class="text-muted small"><p> 默认事务消息最大次数transactionCheckMax=15，以及间隔时间transactionCheckInterval=60*1000 /** * The maximum number of times the message was checked, if exceed this value, this message will be discarded. ...</p></div></div></a></div><div class="card"> <a href="/posts/RockerMQ_DLeger/"><div class="card-body"> <em class="small" data-ts="1656547200" data-df="ll" > Jun 30, 2022 </em><h3 class="pt-0 mt-1 mb-3" data-toc-skip>RocketMQ DLeger</h3><div class="text-muted small"><p> 启动BrokerStartup 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 //main方法启动入口 public static void main(String[] args) { start(createBrokerController(args)); } public stat...</p></div></div></a></div><div class="card"> <a href="/posts/RocketMQ%E6%B6%88%E8%B4%B9%E6%B6%88%E6%81%AF/"><div class="card-body"> <em class="small" data-ts="1656633600" data-df="ll" > Jul 1, 2022 </em><h3 class="pt-0 mt-1 mb-3" data-toc-skip>RocketMQ 消费消息</h3><div class="text-muted small"><p> 1 2 3 4 5 6 7 8 9 //PullMessageProcessor.java private RemotingCommand processRequest(final Channel channel, RemotingCommand request, boolean brokerAllowSuspend) throws RemotingCommandException { ...</p></div></div></a></div></div></div><div class="post-navigation d-flex justify-content-between"> <a href="/posts/badger%E5%86%99%E5%85%A5%E6%B5%81%E7%A8%8B/" class="btn btn-outline-primary" prompt="Older"><p>BadgerDB 写入流程</p></a> <a href="/posts/RockerMQ_DLeger/" class="btn btn-outline-primary" prompt="Newer"><p>RocketMQ DLeger</p></a></div></div></div><footer class="row pl-3 pr-3"><div class="col-12 d-flex justify-content-between align-items-center text-muted pl-0 pr-0"><div class="footer-left"><p class="mb-0"> © 2023 <a href="https://twitter.com/2pc">2pc</a>. <span data-toggle="tooltip" data-placement="top" title="Except where otherwise noted, the blog posts on this site are licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0) License by the author.">Some rights reserved.</span></p></div><div class="footer-right"><p class="mb-0"> Powered by <a href="https://jekyllrb.com" target="_blank" rel="noopener">Jekyll</a> with <a href="https://github.com/cotes2020/jekyll-theme-chirpy" target="_blank" rel="noopener">Chirpy</a> theme.</p></div></div></footer></div><div id="search-result-wrapper" class="d-flex justify-content-center unloaded"><div class="col-12 col-sm-11 post-content"><div id="search-hints"><div id="access-tags"><div class="panel-heading">Trending Tags</div><div class="d-flex flex-wrap mt-3 mb-1 mr-3"> <a class="post-tag" href="/tags/realtime/">realtime</a> <a class="post-tag" href="/tags/flink/">flink</a> <a class="post-tag" href="/tags/distributed/">distributed</a> <a class="post-tag" href="/tags/java/">Java</a> <a class="post-tag" href="/tags/datascience/">Datascience</a> <a class="post-tag" href="/tags/ml/">ML</a> <a class="post-tag" href="/tags/python/">python</a> <a class="post-tag" href="/tags/streamsets/">streamsets</a> <a class="post-tag" href="/tags/search/">Search</a> <a class="post-tag" href="/tags/file/">File</a></div></div></div><div id="search-results" class="d-flex flex-wrap justify-content-center text-muted mt-3"></div></div></div></div><div id="mask"></div><a id="back-to-top" href="#" aria-label="back-to-top" class="btn btn-lg btn-box-shadow" role="button"> <i class="fas fa-angle-up"></i> </a><div id="notification" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-animation="true" data-autohide="false"><div class="toast-header"> <button type="button" class="ml-2 ml-auto close" data-dismiss="toast" aria-label="Close"> <span aria-hidden="true">&times;</span> </button></div><div class="toast-body text-center pt-0"><p class="pl-2 pr-2 mb-3">A new version of content is available.</p><button type="button" class="btn btn-primary" aria-label="Update"> Update </button></div></div><script src="https://cdn.jsdelivr.net/npm/simple-jekyll-search@1.10.0/dest/simple-jekyll-search.min.js"></script> <script> SimpleJekyllSearch({ searchInput: document.getElementById('search-input'), resultsContainer: document.getElementById('search-results'), json: '/assets/js/data/search.json', searchResultTemplate: '<div class="pl-1 pr-1 pl-sm-2 pr-sm-2 pl-lg-4 pr-lg-4 pl-xl-0 pr-xl-0"> <a href="{url}">{title}</a><div class="post-meta d-flex flex-column flex-sm-row text-muted mt-1 mb-1"> {categories} {tags}</div><p>{snippet}</p></div>', noResultsText: '<p class="mt-5">Oops! No results found.</p>', templateMiddleware: function(prop, value, template) { if (prop === 'categories') { if (value === '') { return `${value}`; } else { return `<div class="mr-sm-4"><i class="far fa-folder fa-fw"></i>${value}</div>`; } } if (prop === 'tags') { if (value === '') { return `${value}`; } else { return `<div><i class="fa fa-tag fa-fw"></i>${value}</div>`; } } } }); </script> <script src="https://cdn.jsdelivr.net/combine/npm/magnific-popup@1/dist/jquery.magnific-popup.min.js,npm/lozad/dist/lozad.min.js,npm/clipboard@2/dist/clipboard.min.js"></script> <script src="https://cdn.jsdelivr.net/combine/npm/dayjs@1/dayjs.min.js,npm/dayjs@1/locale/en.min.js,npm/dayjs@1/plugin/relativeTime.min.js,npm/dayjs@1/plugin/localizedFormat.min.js"></script> <script defer src="/assets/js/dist/post.min.js"></script> <script src="https://cdn.jsdelivr.net/npm/bootstrap@4/dist/js/bootstrap.bundle.min.js"></script> <script defer src="/app.js"></script>
